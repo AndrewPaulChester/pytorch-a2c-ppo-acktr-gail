@@ -1,0 +1,81 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: SC2 main",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "--env-name",
+                "SC2MoveToBeacon-v1",
+                "--algo",
+                "ppo",
+                "--use-gae",
+                "--lr",
+                "2.5e-4",
+                "--clip-param",
+                "0.1",
+                "--value-loss-coef",
+                "0.5",
+                "--num-processes",
+                "1",
+                "--num-steps",
+                "128",
+                "--num-mini-batch",
+                "4",
+                "--log-interval",
+                "1",
+                "--use-linear-lr-decay",
+                "--entropy-coef",
+                "0.01"
+            ]
+        },
+        {
+            "name": "Python: taxi main ppo",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "--env-name",
+                "box-taxi-v0",
+                "--algo",
+                "ppo",
+                "--use-gae",
+                "--lr",
+                "2.5e-4",
+                "--clip-param",
+                "0.1",
+                "--value-loss-coef",
+                "0.5",
+                "--num-processes",
+                "1",
+                "--num-steps",
+                "128",
+                "--num-mini-batch",
+                "4",
+                "--log-interval",
+                "1",
+                "--use-linear-lr-decay",
+                "--entropy-coef",
+                "0.01"
+            ]
+        },
+        {
+            "name": "Python: taxi main a2c",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "--env-name",
+                "box-taxi-v0"
+            ]
+        }
+    ]
+}
