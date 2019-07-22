@@ -16,6 +16,9 @@ import torch.optim as optim
 
 from baselines import logger
 
+
+from rlkit.core.external_log import LogRLAlgorithm
+
 from a2c_ppo_acktr import algo, utils
 from a2c_ppo_acktr.algo import gail
 from a2c_ppo_acktr.arguments import get_args
@@ -34,10 +37,12 @@ def main(arglist):
     FLAGS = flags.FLAGS
     FLAGS([""])
 
-    logger.set_level(logger.INFO)
+    logger.set_level(logger.DEBUG)
 
     # get all arguments from command line - there are lots!
     args = get_args(arglist)
+
+    tb_log = LogRLAlgorithm(num_processes=args.num_processes)
 
     # set manual seeds for reproducability
     torch.manual_seed(args.seed)
@@ -67,17 +72,15 @@ def main(arglist):
         args.log_dir,
         device,
         False,
+        1,
     )
 
-    obs_shape = (
-        envs.observation_space.shape
-        if envs.observation_space.shape != ()
-        else [envs.observation_space.n]
-    )
     # Creates the policy network. Of note it the observation and action spaces used to
     # set input and output sizes
     actor_critic = Policy(
-        obs_shape, envs.action_space, base_kwargs={"recurrent": args.recurrent_policy}
+        envs.observation_space.shape,
+        envs.action_space,
+        base_kwargs={"recurrent": args.recurrent_policy},
     )
     actor_critic.to(device)
 
@@ -166,14 +169,16 @@ def main(arglist):
                     rollouts.recurrent_hidden_states[step],
                     rollouts.masks[step],
                 )
-                logger.debug(
-                    f"value: {value}, action: {action}, action_log_prob: {action_log_prob}"
-                )
+
             # Observe reward and next obs
             obs, reward, done, infos = envs.step(action)
-
+            logger.debug(
+                f"value: {value}, action: {action}, action_log_prob: {action_log_prob}, reward: {reward}, done: {done}"
+            )
+            tb_log.expl_data_collector.add_step(action, action_log_prob, reward, done)
+            # for each thread
             for info in infos:
-                if "episode" in info.keys():
+                if "episode" in info.keys():  # if episode ended
                     episode_rewards.append(info["episode"]["r"])
 
             # If done then clean the history of observations.
@@ -230,7 +235,7 @@ def main(arglist):
         )
         # update agent
         value_loss, action_loss, dist_entropy = agent.update(rollouts)
-        # ???
+        # re-initialise experience buffer with current state
         rollouts.after_update()
 
         # save model for every interval-th episode or for the last epoch
@@ -267,6 +272,9 @@ def main(arglist):
                     action_loss,
                 )
             )
+
+            tb_log._log_stats(int(j / args.log_interval))
+            tb_log.expl_data_collector.end_epoch(int(j / args.log_interval))
 
         # evaluate if requested
         if (
