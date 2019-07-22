@@ -74,7 +74,11 @@
             "console": "integratedTerminal",
             "args": [
                 "--env-name",
-                "box-taxi-v0"
+                "box-taxi-v0",
+                "--num-processes",
+                "1",
+                "--entropy-coef",
+                "100"
             ]
         }
     ]
