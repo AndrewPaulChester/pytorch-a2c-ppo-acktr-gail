@@ -14,7 +14,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-from baselines import logger
+from rlkit.core import logger
 
 
 from rlkit.core.external_log import LogRLAlgorithm
@@ -36,8 +36,6 @@ def main(arglist):
 
     FLAGS = flags.FLAGS
     FLAGS([""])
-
-    logger.set_level(logger.DEBUG)
 
     # get all arguments from command line - there are lots!
     args = get_args(arglist)
@@ -172,10 +170,9 @@ def main(arglist):
 
             # Observe reward and next obs
             obs, reward, done, infos = envs.step(action)
-            logger.debug(
-                f"value: {value}, action: {action}, action_log_prob: {action_log_prob}, reward: {reward}, done: {done}"
+            tb_log.expl_data_collector.add_step(
+                action, action_log_prob, reward, done, value
             )
-            tb_log.expl_data_collector.add_step(action, action_log_prob, reward, done)
             # for each thread
             for info in infos:
                 if "episode" in info.keys():  # if episode ended
@@ -273,6 +270,18 @@ def main(arglist):
                 )
             )
 
+            # histogram parameters
+            layer = 0
+            for l in actor_critic.base.main:
+                try:
+                    b = l.bias
+                    w = l.weight
+                    logger.record_histogram_dict(
+                        {f"{layer}/bias": b, f"{layer}/weight": w}, prefix="layer"
+                    )
+                    layer += 1
+                except AttributeError:
+                    pass
             tb_log._log_stats(int(j / args.log_interval))
             tb_log.expl_data_collector.end_epoch(int(j / args.log_interval))
 

@@ -4,6 +4,7 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+
         {
             "name": "Python: SC2 main",
             "type": "python",
@@ -74,11 +75,22 @@
             "console": "integratedTerminal",
             "args": [
                 "--env-name",
-                "box-taxi-v0",
+                "box-taxi-v2",
                 "--num-processes",
                 "1",
                 "--entropy-coef",
                 "100"
+            ]
+        },
+        {
+            "name": "Python: pong main a2c",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "--num-processes",
+                "1"
             ]
         }
     ]
