@@ -90,7 +90,9 @@
             "console": "integratedTerminal",
             "args": [
                 "--num-processes",
-                "1"
+                "1",
+                "--env-name",
+                "PongNoFrameskip-v4"
             ]
         }
     ]
