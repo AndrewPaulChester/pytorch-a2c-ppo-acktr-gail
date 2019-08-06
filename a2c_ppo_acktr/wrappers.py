@@ -153,6 +153,8 @@ class RolloutStepCollector(LogPathCollector):
         return self._rollouts
 
     def collect_one_step(self, step):
+        print("rollouts")
+        print(self._rollouts.obs[step])
         with torch.no_grad():
             value, action, action_log_prob, recurrent_hidden_states = self._policy.get_action(
                 self._rollouts.obs[step],
@@ -161,6 +163,8 @@ class RolloutStepCollector(LogPathCollector):
             )
 
         # Observe reward and next obs
+        print("action")
+        print(action)
         obs, reward, done, infos = self._env.step(action)
 
         # If done then clean the history of observations.
