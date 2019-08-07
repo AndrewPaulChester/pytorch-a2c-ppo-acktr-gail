@@ -153,8 +153,6 @@ class RolloutStepCollector(LogPathCollector):
         return self._rollouts
 
     def collect_one_step(self, step):
-        print("rollouts")
-        print(self._rollouts.obs[step])
         with torch.no_grad():
             value, action, action_log_prob, recurrent_hidden_states = self._policy.get_action(
                 self._rollouts.obs[step],
@@ -163,8 +161,6 @@ class RolloutStepCollector(LogPathCollector):
             )
 
         # Observe reward and next obs
-        print("action")
-        print(action)
         obs, reward, done, infos = self._env.step(action)
 
         # If done then clean the history of observations.
@@ -234,16 +230,18 @@ class IkostrikovRLAlgorithm(BaseRLAlgorithm, metaclass=abc.ABCMeta):
         for epoch in gt.timed_for(
             range(self._start_epoch, self.num_epochs), save_itrs=True
         ):
-            # this if check could be moved inside the function
-            if self.use_linear_lr_decay:
-                # decrease learning rate linearly
-                self.trainer.decay_lr(epoch, self.num_epochs)
+ 
 
             for step in range(self.num_eval_steps_per_epoch):
                 self.eval_data_collector.collect_one_step(step)
             gt.stamp("evaluation sampling")
 
             for _ in range(self.num_train_loops_per_epoch):
+                # this if check could be moved inside the function
+                if self.use_linear_lr_decay:    
+                    # decrease learning rate linearly
+                    self.trainer.decay_lr(epoch, self.num_epochs)
+
                 for step in range(self.num_expl_steps_per_train_loop):
                     self.expl_data_collector.collect_one_step(step)
                     gt.stamp("data storing", unique=False)
