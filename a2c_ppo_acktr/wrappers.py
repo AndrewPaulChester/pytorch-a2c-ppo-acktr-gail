@@ -17,6 +17,7 @@ from rlkit.core.external_log import LogPathCollector
 from rlkit.core.rl_algorithm import BaseRLAlgorithm
 from rlkit.data_management.replay_buffer import ReplayBuffer
 import rlkit.torch.pytorch_util as ptu
+from rlkit.util.multi_queue import MultiQueue
 
 from gym_taxi.utils.spaces import Json
 
@@ -317,6 +318,8 @@ class HierarchicalStepCollector(RolloutStepCollector):
             render_kwargs,
             num_processes,
         )
+        self.multi_queue = MultiQueue(num_processes)
+        self.cumulative_reward = np.zeros(num_processes)
 
     def collect_one_step(self, step):
         """
@@ -329,15 +332,46 @@ class HierarchicalStepCollector(RolloutStepCollector):
 
         """
         with torch.no_grad():
-            (action, explored), agent_info = self._policy.get_action(self.obs)
+            results = self._policy.get_action(self.obs)
+        action = ptu.tensor([[a] for (a, _), _ in results])
 
         # Observe reward and next obs
         obs, reward, done, infos = self._env.step(ptu.get_numpy(action))
         self.obs = obs
-        if agent_info.get("subgoal") is not None:
-            value = agent_info["value"]
-            action_log_prob = agent_info["probs"]
-            recurrent_hidden_states = agent_info["rnn_hxs"]
+
+        for i, ((a, e), ai) in enumerate(results):
+            if "subgoal" in ai:
+                self.multi_queue.add_item(
+                    (
+                        obs[i],
+                        ai["rnn_hxs"],
+                        a,
+                        ai["probs"],
+                        e,
+                        ai["value"],
+                        self.cumulative_reward[i],
+                    ),
+                    i,
+                )
+                self.cumulative_reward[i] = 0
+
+        self.cumulative_reward += reward
+
+        if self.multi_queue.check_layer():
+            layer = self.multi_queue.pop_layer()
+
+            obs, recurrent_hidden_states, action, action_log_prob, explored, value, reward = [
+                z for z in zip(*layer)
+            ]
+
+            # action =
+            # obs =
+            # reward =
+            # done =
+            # infos =
+            # value = agent_info["value"]
+            # action_log_prob = agent_info["probs"]
+            # recurrent_hidden_states = agent_info["rnn_hxs"]
 
             if isinstance(self._env.observation_space, Json):
                 obs = np.array([self._env.envs[0].convert_to_image(o[0]) for o in obs])
