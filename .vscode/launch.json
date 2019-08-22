@@ -5,6 +5,7 @@
     "version": "0.2.0",
     "configurations": [
 
+
         {
             "name": "Python: SC2 main",
             "type": "python",
@@ -79,7 +80,21 @@
                 "--num-processes",
                 "1",
                 "--entropy-coef",
-                "100"
+                "0.005"
+            ]
+        },    {
+            "name": "Python: large taxi main a2c",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "--env-name",
+                "large-taxi-v2",
+                "--num-processes",
+                "1",
+                "--entropy-coef",
+                "0.005"
             ]
         },
         {

@@ -1,10 +1,10 @@
 import math
 import abc
 from collections import OrderedDict
+import numpy as np
 
 import torch
 import gtimer as gt
-
 
 from a2c_ppo_acktr.model import Policy
 from a2c_ppo_acktr.algo.a2c_acktr import A2C_ACKTR
@@ -16,6 +16,9 @@ from rlkit.torch.torch_rl_algorithm import TorchTrainer
 from rlkit.core.external_log import LogPathCollector
 from rlkit.core.rl_algorithm import BaseRLAlgorithm
 from rlkit.data_management.replay_buffer import ReplayBuffer
+import rlkit.torch.pytorch_util as ptu
+
+from gym_taxi.utils.spaces import Json
 
 
 class WrappedPolicy(Policy):
@@ -23,24 +26,36 @@ class WrappedPolicy(Policy):
         self,
         obs_shape,
         action_space,
+        device,
         base=None,
         base_kwargs=None,
         deterministic=False,
         dist=None,
+        num_processes=1,
     ):
         super(WrappedPolicy, self).__init__(
             obs_shape, action_space, base, base_kwargs, dist
         )
         self.deterministic = deterministic
+        self.rnn_hxs = torch.zeros(num_processes, 1)
+        self.masks = torch.ones(num_processes, 1)
+        self.device = device
 
-    def get_action(self, inputs, rnn, masks):
+    def get_action(self, inputs, rnn_hxs=None, masks=None):
+        inputs = torch.from_numpy(inputs).float().to(self.device)
+        if rnn_hxs is None:
+            rnn_hxs = self.rnn_hxs
+        if masks is None:
+            masks = self.masks
+
         value, action, action_log_probs, rnn_hxs = self.act(
-            inputs, rnn, masks, self.deterministic
+            inputs, rnn_hxs, masks, self.deterministic
         )  # Need to be careful about rnn and masks - won't work for recursive
-        agent_info = {"value": value, "probs": action_log_probs}
+
+        agent_info = {"value": value, "probs": action_log_probs, "rnn_hxs": rnn_hxs}
         explored = action_log_probs < math.log(0.5)
-        return value, action, action_log_probs, rnn_hxs
-        # return (action, explored), agent_info
+        # return value, action, action_log_probs, rnn_hxs
+        return (action, explored), agent_info
 
     def reset(self):
         pass
@@ -221,30 +236,46 @@ class RolloutStepCollector(LogPathCollector):
             env, policy, max_num_epoch_paths_saved, render, render_kwargs, num_processes
         )
         self.num_processes = num_processes
+        shape = (
+            env.observation_space.image.shape
+            if isinstance(env.observation_space, Json)
+            else env.observation_space.shape
+        )
         self._rollouts = RolloutStorage(
             max_num_epoch_paths_saved,
             num_processes,
-            env.observation_space.shape,
+            shape,
             env.action_space,
-            policy.recurrent_hidden_state_size,
+            1,  # hardcoding reccurent hidden state off for now.
         )
         obs = env.reset()
+        self.obs = obs
+        self.device = device
+        if isinstance(env.observation_space, Json):
+            obs = np.array([env.envs[0].convert_to_image(o[0]) for o in obs])
+        obs = torch.from_numpy(obs).float().to(self.device)
         self._rollouts.obs[0].copy_(obs)
-        self._rollouts.to(device)
+        self._rollouts.to(self.device)
 
     def get_rollouts(self):
         return self._rollouts
 
     def collect_one_step(self, step):
         with torch.no_grad():
-            value, action, action_log_prob, recurrent_hidden_states = self._policy.get_action(
-                self._rollouts.obs[step],
-                self._rollouts.recurrent_hidden_states[step],
-                self._rollouts.masks[step],
-            )
+            (action, explored), agent_info = self._policy.get_action(self.obs)
+
+        value = agent_info["value"]
+        action_log_prob = agent_info["probs"]
+        recurrent_hidden_states = agent_info["rnn_hxs"]
 
         # Observe reward and next obs
-        obs, reward, done, infos = self._env.step(action)
+        obs, reward, done, infos = self._env.step(ptu.get_numpy(action))
+        self.obs = obs
+        if isinstance(self._env.observation_space, Json):
+            obs = np.array([self._env.envs[0].convert_to_image(o[0]) for o in obs])
+
+        obs = torch.from_numpy(obs).float().to(self.device)
+        reward = torch.from_numpy(reward).unsqueeze(dim=1).float()
 
         # If done then clean the history of observations.
         masks = torch.FloatTensor([[0.0] if done_ else [1.0] for done_ in done])
@@ -264,6 +295,74 @@ class RolloutStepCollector(LogPathCollector):
             bad_masks,
         )
         self.add_step(action, action_log_prob, reward, done, value)
+
+
+class HierarchicalStepCollector(RolloutStepCollector):
+    def __init__(
+        self,
+        env,
+        policy,
+        device,
+        max_num_epoch_paths_saved=None,
+        render=False,
+        render_kwargs=None,
+        num_processes=1,
+    ):
+        super().__init__(
+            env,
+            policy,
+            device,
+            max_num_epoch_paths_saved,
+            render,
+            render_kwargs,
+            num_processes,
+        )
+
+    def collect_one_step(self, step):
+        """
+        This needs to handle the fact that different environments can have different plan lengths, and so the macro steps are not in sync. 
+
+        Issues: 
+            cumulative reward
+            multiple queued experiences for some environments
+            identifying termination
+
+        """
+        with torch.no_grad():
+            (action, explored), agent_info = self._policy.get_action(self.obs)
+
+        # Observe reward and next obs
+        obs, reward, done, infos = self._env.step(ptu.get_numpy(action))
+        self.obs = obs
+        if agent_info.get("subgoal") is not None:
+            value = agent_info["value"]
+            action_log_prob = agent_info["probs"]
+            recurrent_hidden_states = agent_info["rnn_hxs"]
+
+            if isinstance(self._env.observation_space, Json):
+                obs = np.array([self._env.envs[0].convert_to_image(o[0]) for o in obs])
+
+            obs = torch.from_numpy(obs).float().to(self.device)
+            reward = torch.from_numpy(reward).unsqueeze(dim=1).float()
+
+            # If done then clean the history of observations.
+            masks = torch.FloatTensor([[0.0] if done_ else [1.0] for done_ in done])
+            bad_masks = torch.FloatTensor(
+                [[0.0] if "bad_transition" in info.keys() else [1.0] for info in infos]
+            )
+            gt.stamp("exploration sampling", unique=False)
+
+            self._rollouts.insert(
+                obs,
+                recurrent_hidden_states,
+                action,
+                action_log_prob,
+                value,
+                reward,
+                masks,
+                bad_masks,
+            )
+            self.add_step(action, action_log_prob, reward, done, value)
 
 
 class IkostrikovRLAlgorithm(BaseRLAlgorithm, metaclass=abc.ABCMeta):
