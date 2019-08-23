@@ -345,11 +345,13 @@ class HierarchicalStepCollector(RolloutStepCollector):
                     (
                         obs[i],
                         ai["rnn_hxs"],
-                        a,
+                        action[i],
                         ai["probs"],
                         e,
                         ai["value"],
                         self.cumulative_reward[i],
+                        done[i],
+                        infos[i],
                     ),
                     i,
                 )
@@ -360,18 +362,17 @@ class HierarchicalStepCollector(RolloutStepCollector):
         if self.multi_queue.check_layer():
             layer = self.multi_queue.pop_layer()
 
-            obs, recurrent_hidden_states, action, action_log_prob, explored, value, reward = [
+            obs, recurrent_hidden_states, action, action_log_prob, explored, value, reward, done, infos = [
                 z for z in zip(*layer)
             ]
 
-            # action =
-            # obs =
-            # reward =
-            # done =
-            # infos =
-            # value = agent_info["value"]
-            # action_log_prob = agent_info["probs"]
-            # recurrent_hidden_states = agent_info["rnn_hxs"]
+            obs = np.array(obs)
+            recurrent_hidden_states = torch.cat(recurrent_hidden_states)
+            action = torch.stack(action, dim=0)
+            action_log_prob = torch.cat(action_log_prob)
+            explored = torch.cat(explored)
+            value = torch.cat(value)
+            reward = np.array(reward)
 
             if isinstance(self._env.observation_space, Json):
                 obs = np.array([self._env.envs[0].convert_to_image(o[0]) for o in obs])
