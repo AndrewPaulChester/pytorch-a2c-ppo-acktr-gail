@@ -20,6 +20,7 @@ import rlkit.torch.pytorch_util as ptu
 from rlkit.util.multi_queue import MultiQueue
 
 from gym_taxi.utils.spaces import Json
+from gym_taxi.utils.representations import json_to_screen
 
 
 class WrappedPolicy(Policy):
@@ -253,7 +254,7 @@ class RolloutStepCollector(LogPathCollector):
         self.obs = obs
         self.device = device
         if isinstance(env.observation_space, Json):
-            obs = np.array([env.envs[0].convert_to_image(o[0]) for o in obs])
+            obs = np.array([json_to_screen(o[0]) for o in obs])
         obs = torch.from_numpy(obs).float().to(self.device)
         self._rollouts.obs[0].copy_(obs)
         self._rollouts.to(self.device)
@@ -273,7 +274,7 @@ class RolloutStepCollector(LogPathCollector):
         obs, reward, done, infos = self._env.step(ptu.get_numpy(action))
         self.obs = obs
         if isinstance(self._env.observation_space, Json):
-            obs = np.array([self._env.envs[0].convert_to_image(o[0]) for o in obs])
+            obs = np.array([json_to_screen(o[0]) for o in obs])
 
         obs = torch.from_numpy(obs).float().to(self.device)
         reward = torch.from_numpy(reward).unsqueeze(dim=1).float()
@@ -318,7 +319,8 @@ class HierarchicalStepCollector(RolloutStepCollector):
             render_kwargs,
             num_processes,
         )
-        self.multi_queue = MultiQueue(num_processes)
+        self.action_queue = MultiQueue(num_processes)
+        self.obs_queue = MultiQueue(num_processes)
         self.cumulative_reward = np.zeros(num_processes)
 
     def collect_one_step(self, step):
@@ -332,50 +334,48 @@ class HierarchicalStepCollector(RolloutStepCollector):
 
         """
         with torch.no_grad():
-            results = self._policy.get_action(self.obs)
+            results = self._policy.get_action(
+                self.obs
+            )  # TODO: reset action queue for learner agent when environment is solved.
         action = ptu.tensor([[a] for (a, _), _ in results])
 
         # Observe reward and next obs
         obs, reward, done, infos = self._env.step(ptu.get_numpy(action))
         self.obs = obs
+        self.cumulative_reward += reward
 
         for i, ((a, e), ai) in enumerate(results):
             if "subgoal" in ai:
-                self.multi_queue.add_item(
-                    (
-                        obs[i],
-                        ai["rnn_hxs"],
-                        action[i],
-                        ai["probs"],
-                        e,
-                        ai["value"],
-                        self.cumulative_reward[i],
-                        done[i],
-                        infos[i],
-                    ),
-                    i,
+                self.action_queue.add_item(
+                    (ai["rnn_hxs"][i], ai["subgoal"], ai["probs"], e, ai["value"]), i
+                )
+
+            elif done[i] or "empty" in ai:
+                if done[i]:
+                    self._policy.reset(i)
+                self.obs_queue.add_item(
+                    (obs[i], self.cumulative_reward[i], done[i], infos[i]), i
                 )
                 self.cumulative_reward[i] = 0
 
-        self.cumulative_reward += reward
-
-        if self.multi_queue.check_layer():
-            layer = self.multi_queue.pop_layer()
-
-            obs, recurrent_hidden_states, action, action_log_prob, explored, value, reward, done, infos = [
+        if self.obs_queue.check_layer():
+            o_layer = self.obs_queue.pop_layer()
+            a_layer = self.action_queue.pop_layer()
+            layer = [o + a for o, a in zip(o_layer, a_layer)]
+            obs, reward, done, infos, recurrent_hidden_states, action, action_log_prob, explored, value = [
                 z for z in zip(*layer)
             ]
 
             obs = np.array(obs)
-            recurrent_hidden_states = torch.cat(recurrent_hidden_states)
-            action = torch.stack(action, dim=0)
+            recurrent_hidden_states = torch.stack(recurrent_hidden_states, dim=0)
+            action = torch.cat(action)
             action_log_prob = torch.cat(action_log_prob)
             explored = torch.cat(explored)
             value = torch.cat(value)
             reward = np.array(reward)
 
             if isinstance(self._env.observation_space, Json):
-                obs = np.array([self._env.envs[0].convert_to_image(o[0]) for o in obs])
+                obs = np.array([json_to_screen(o[0]) for o in obs])
 
             obs = torch.from_numpy(obs).float().to(self.device)
             reward = torch.from_numpy(reward).unsqueeze(dim=1).float()
