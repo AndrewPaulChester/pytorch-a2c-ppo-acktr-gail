@@ -85,6 +85,7 @@ def make_vec_envs(
     device,
     allow_early_resets,
     num_frame_stack=None,
+    pytorch=True,
 ):
     envs = [
         make_env(env_name, seed, i, log_dir, allow_early_resets)
@@ -96,18 +97,21 @@ def make_vec_envs(
     else:
         envs = DummyVecEnv(envs)
 
-    if len(envs.observation_space.shape) == 1:
+    if len(envs.observation_space.shape) == 1 and not hasattr(
+        envs.unwrapped.observation_space, "image"
+    ):
         if gamma is None:
             envs = VecNormalize(envs, ret=False)
         else:
             envs = VecNormalize(envs, gamma=gamma)
 
-    envs = VecPyTorch(envs, device)
+    if pytorch:
+        envs = VecPyTorch(envs, device)
 
-    if num_frame_stack is not None:
-        envs = VecPyTorchFrameStack(envs, num_frame_stack, device)
-    elif len(envs.observation_space.shape) == 3:
-        envs = VecPyTorchFrameStack(envs, 4, device)
+        if num_frame_stack is not None:
+            envs = VecPyTorchFrameStack(envs, num_frame_stack, device)
+        elif len(envs.observation_space.shape) == 3:
+            envs = VecPyTorchFrameStack(envs, 4, device)
 
     return envs
 

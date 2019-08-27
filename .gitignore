@@ -108,3 +108,6 @@ trained_models/
 #logs
 /logs/
 /tb/
+data/params.pkl
+data/progress.csv
+data/variant.json
