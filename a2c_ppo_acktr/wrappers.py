@@ -272,6 +272,9 @@ class RolloutStepCollector(LogPathCollector):
 
         # Observe reward and next obs
         obs, reward, done, infos = self._env.step(ptu.get_numpy(action))
+        if self._render:
+            self._env.render(**self._render_kwargs)
+
         self.obs = obs
         if isinstance(self._env.observation_space, Json):
             obs = np.array([json_to_screen(o[0]) for o in obs])
@@ -342,6 +345,8 @@ class HierarchicalStepCollector(RolloutStepCollector):
 
             # Observe reward and next obs
             obs, reward, done, infos = self._env.step(ptu.get_numpy(action))
+            if self._render:
+                self._env.render(**self._render_kwargs)
             self.obs = obs
             self.cumulative_reward += reward
 
