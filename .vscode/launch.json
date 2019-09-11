@@ -96,6 +96,20 @@
                 "--entropy-coef",
                 "0.005"
             ]
+        },   {
+            "name": "Python: multi taxi main a2c",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "--env-name",
+                "multi-taxi-v2",
+                "--num-processes",
+                "1",
+                "--entropy-coef",
+                "0.005"
+            ]
         },
         {
             "name": "Python: pong main a2c",

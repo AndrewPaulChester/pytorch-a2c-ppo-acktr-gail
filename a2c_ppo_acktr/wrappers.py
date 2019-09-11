@@ -272,6 +272,9 @@ class RolloutStepCollector(LogPathCollector):
 
         # Observe reward and next obs
         obs, reward, done, infos = self._env.step(ptu.get_numpy(action))
+        if self._render:
+            self._env.render(**self._render_kwargs)
+
         self.obs = obs
         if isinstance(self._env.observation_space, Json):
             obs = np.array([json_to_screen(o[0]) for o in obs])
@@ -333,71 +336,74 @@ class HierarchicalStepCollector(RolloutStepCollector):
             identifying termination
 
         """
-        with torch.no_grad():
-            results = self._policy.get_action(
-                self.obs
-            )  # TODO: reset action queue for learner agent when environment is solved.
-        action = ptu.tensor([[a] for (a, _), _ in results])
+        while not self.obs_queue.check_layer():
+            with torch.no_grad():
+                results = self._policy.get_action(
+                    self.obs
+                )  # TODO: reset action queue for learner agent when environment is solved.
+            action = ptu.tensor([[a] for (a, _), _ in results])
 
-        # Observe reward and next obs
-        obs, reward, done, infos = self._env.step(ptu.get_numpy(action))
-        self.obs = obs
-        self.cumulative_reward += reward
+            # Observe reward and next obs
+            obs, reward, done, infos = self._env.step(ptu.get_numpy(action))
+            if self._render:
+                self._env.render(**self._render_kwargs)
+            self.obs = obs
+            self.cumulative_reward += reward
 
-        for i, ((a, e), ai) in enumerate(results):
-            if "subgoal" in ai:
-                self.action_queue.add_item(
-                    (ai["rnn_hxs"][i], ai["subgoal"], ai["probs"], e, ai["value"]), i
-                )
+            for i, ((a, e), ai) in enumerate(results):
+                if "subgoal" in ai:
+                    self.action_queue.add_item(
+                        (ai["rnn_hxs"][i], ai["subgoal"], ai["probs"], e, ai["value"]),
+                        i,
+                    )
 
-            elif done[i] or "empty" in ai:
-                if done[i]:
-                    self._policy.reset(i)
-                self.obs_queue.add_item(
-                    (obs[i], self.cumulative_reward[i], done[i], infos[i]), i
-                )
-                self.cumulative_reward[i] = 0
+                elif done[i] or "empty" in ai:
+                    if done[i]:
+                        self._policy.reset(i)
+                    self.obs_queue.add_item(
+                        (obs[i], self.cumulative_reward[i], done[i], infos[i]), i
+                    )
+                    self.cumulative_reward[i] = 0
 
-        if self.obs_queue.check_layer():
-            o_layer = self.obs_queue.pop_layer()
-            a_layer = self.action_queue.pop_layer()
-            layer = [o + a for o, a in zip(o_layer, a_layer)]
-            obs, reward, done, infos, recurrent_hidden_states, action, action_log_prob, explored, value = [
-                z for z in zip(*layer)
-            ]
+        o_layer = self.obs_queue.pop_layer()
+        a_layer = self.action_queue.pop_layer()
+        layer = [o + a for o, a in zip(o_layer, a_layer)]
+        obs, reward, done, infos, recurrent_hidden_states, action, action_log_prob, explored, value = [
+            z for z in zip(*layer)
+        ]
 
-            obs = np.array(obs)
-            recurrent_hidden_states = torch.stack(recurrent_hidden_states, dim=0)
-            action = torch.cat(action)
-            action_log_prob = torch.cat(action_log_prob)
-            explored = torch.cat(explored)
-            value = torch.cat(value)
-            reward = np.array(reward)
+        obs = np.array(obs)
+        recurrent_hidden_states = torch.stack(recurrent_hidden_states, dim=0)
+        action = torch.cat(action)
+        action_log_prob = torch.cat(action_log_prob)
+        explored = torch.cat(explored)
+        value = torch.cat(value)
+        reward = np.array(reward)
 
-            if isinstance(self._env.observation_space, Json):
-                obs = np.array([json_to_screen(o[0]) for o in obs])
+        if isinstance(self._env.observation_space, Json):
+            obs = np.array([json_to_screen(o[0]) for o in obs])
 
-            obs = torch.from_numpy(obs).float().to(self.device)
-            reward = torch.from_numpy(reward).unsqueeze(dim=1).float()
+        obs = torch.from_numpy(obs).float().to(self.device)
+        reward = torch.from_numpy(reward).unsqueeze(dim=1).float()
 
-            # If done then clean the history of observations.
-            masks = torch.FloatTensor([[0.0] if done_ else [1.0] for done_ in done])
-            bad_masks = torch.FloatTensor(
-                [[0.0] if "bad_transition" in info.keys() else [1.0] for info in infos]
-            )
-            gt.stamp("exploration sampling", unique=False)
+        # If done then clean the history of observations.
+        masks = torch.FloatTensor([[0.0] if done_ else [1.0] for done_ in done])
+        bad_masks = torch.FloatTensor(
+            [[0.0] if "bad_transition" in info.keys() else [1.0] for info in infos]
+        )
+        gt.stamp("exploration sampling", unique=False)
 
-            self._rollouts.insert(
-                obs,
-                recurrent_hidden_states,
-                action,
-                action_log_prob,
-                value,
-                reward,
-                masks,
-                bad_masks,
-            )
-            self.add_step(action, action_log_prob, reward, done, value)
+        self._rollouts.insert(
+            obs,
+            recurrent_hidden_states,
+            action,
+            action_log_prob,
+            value,
+            reward,
+            masks,
+            bad_masks,
+        )
+        self.add_step(action, action_log_prob, reward, done, value)
 
 
 class IkostrikovRLAlgorithm(BaseRLAlgorithm, metaclass=abc.ABCMeta):
