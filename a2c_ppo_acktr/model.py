@@ -85,6 +85,8 @@ class Policy(nn.Module):
         return value
 
     def evaluate_actions(self, inputs, rnn_hxs, masks, action):
+        # given an sample from the replay buffer, returns the state value,
+        # the action log prob (for the chosen action) and the entropy of the distribution
         value, actor_features, rnn_hxs = self.base(inputs, rnn_hxs, masks)
         dist = self.dist(actor_features)
 

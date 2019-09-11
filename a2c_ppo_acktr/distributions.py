@@ -21,8 +21,12 @@ old_sample = FixedCategorical.sample
 FixedCategorical.sample = lambda self: old_sample(self).unsqueeze(-1)
 
 log_prob_cat = FixedCategorical.log_prob
-FixedCategorical.log_probs = lambda self, actions: log_prob_cat(
-    self, actions.squeeze(-1)).view(actions.size(0), -1).sum(-1).unsqueeze(-1)
+FixedCategorical.log_probs = (
+    lambda self, actions: log_prob_cat(self, actions.squeeze(-1))
+    .view(actions.size(0), -1)
+    .sum(-1)
+    .unsqueeze(-1)
+)
 
 FixedCategorical.mode = lambda self: self.probs.argmax(dim=-1, keepdim=True)
 
@@ -30,9 +34,9 @@ FixedCategorical.mode = lambda self: self.probs.argmax(dim=-1, keepdim=True)
 FixedNormal = torch.distributions.Normal
 
 log_prob_normal = FixedNormal.log_prob
-FixedNormal.log_probs = lambda self, actions: log_prob_normal(
-    self, actions).sum(
-        -1, keepdim=True)
+FixedNormal.log_probs = lambda self, actions: log_prob_normal(self, actions).sum(
+    -1, keepdim=True
+)
 
 normal_entropy = FixedNormal.entropy
 FixedNormal.entropy = lambda self: normal_entropy(self).sum(-1)
@@ -43,8 +47,12 @@ FixedNormal.mode = lambda self: self.mean
 FixedBernoulli = torch.distributions.Bernoulli
 
 log_prob_bernoulli = FixedBernoulli.log_prob
-FixedBernoulli.log_probs = lambda self, actions: log_prob_bernoulli(
-    self, actions).view(actions.size(0), -1).sum(-1).unsqueeze(-1)
+FixedBernoulli.log_probs = (
+    lambda self, actions: log_prob_bernoulli(self, actions)
+    .view(actions.size(0), -1)
+    .sum(-1)
+    .unsqueeze(-1)
+)
 
 bernoulli_entropy = FixedBernoulli.entropy
 FixedBernoulli.entropy = lambda self: bernoulli_entropy(self).sum(-1)
@@ -56,10 +64,8 @@ class Categorical(nn.Module):
         super(Categorical, self).__init__()
 
         init_ = lambda m: init(
-            m,
-            nn.init.orthogonal_,
-            lambda x: nn.init.constant_(x, 0),
-            gain=0.01)
+            m, nn.init.orthogonal_, lambda x: nn.init.constant_(x, 0), gain=0.01
+        )
 
         self.linear = init_(nn.Linear(num_inputs, num_outputs))
 
@@ -72,8 +78,9 @@ class DiagGaussian(nn.Module):
     def __init__(self, num_inputs, num_outputs):
         super(DiagGaussian, self).__init__()
 
-        init_ = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
-                               constant_(x, 0))
+        init_ = lambda m: init(
+            m, nn.init.orthogonal_, lambda x: nn.init.constant_(x, 0)
+        )
 
         self.fc_mean = init_(nn.Linear(num_inputs, num_outputs))
         self.logstd = AddBias(torch.zeros(num_outputs))
@@ -94,11 +101,50 @@ class Bernoulli(nn.Module):
     def __init__(self, num_inputs, num_outputs):
         super(Bernoulli, self).__init__()
 
-        init_ = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
-                               constant_(x, 0))
+        init_ = lambda m: init(
+            m, nn.init.orthogonal_, lambda x: nn.init.constant_(x, 0)
+        )
 
         self.linear = init_(nn.Linear(num_inputs, num_outputs))
 
     def forward(self, x):
         x = self.linear(x)
         return FixedBernoulli(logits=x)
+
+
+class DistributionGeneratorTuple(nn.Module):
+    def __init__(self, distributions):
+        super(DistributionGeneratorTuple, self).__init__()
+        self.distributions = nn.ModuleList(distributions)
+
+    def forward(self, x):
+        return DistributionTuple([d.forward(x) for d in self.distributions])
+
+    def __call__(self, x):
+        return DistributionTuple([d(x) for d in self.distributions])
+
+
+class DistributionTuple:
+    def __init__(self, distributions):
+        self.distributions = distributions
+
+    def mode(self):
+        return torch.cat([d.mode() for d in self.distributions], 1)
+
+    def sample(self):
+        return torch.cat([d.sample() for d in self.distributions], 1)
+
+    def log_probs(self, action):
+        # lp = [d.log_probs(a) for a, d in zip(action, self.distributions)]
+        min_index = 0
+        max_index = 0
+        log_prob = 0
+        for d in self.distributions:
+            max_index += d.batch_shape[1]
+            log_prob += d.log_probs(action[:, min_index:max_index])
+            min_index = max_index
+        return log_prob
+
+    def entropy(self):
+        return sum([d.entropy() for d in self.distributions])
+
