@@ -351,13 +351,14 @@ class HierarchicalStepCollector(RolloutStepCollector):
             self.cumulative_reward += reward
 
             for i, ((a, e), ai) in enumerate(results):
+                if ai.get("failed"):  # add a penalty for failing to generate a plan
+                    self.cumulative_reward[i] -= 10
                 if "subgoal" in ai:
                     self.action_queue.add_item(
                         (ai["rnn_hxs"][i], ai["subgoal"], ai["probs"], e, ai["value"]),
                         i,
                     )
-
-                elif done[i] or "empty" in ai:
+                if done[i] or "empty" in ai:
                     if done[i]:
                         self._policy.reset(i)
                     self.obs_queue.add_item(
