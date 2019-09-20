@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from gym.spaces import Tuple
+
 from a2c_ppo_acktr.distributions import Bernoulli, Categorical, DiagGaussian
 from a2c_ppo_acktr.utils import init
 
@@ -31,7 +33,15 @@ class Flatten(nn.Module):
 
 
 class Policy(nn.Module):
-    def __init__(self, obs_shape, action_space, base=None, base_kwargs=None, dist=None):
+    def __init__(
+        self,
+        obs_shape,
+        action_space,
+        base=None,
+        base_kwargs=None,
+        dist=None,
+        obs_space=None,
+    ):
         super(Policy, self).__init__()
         if base_kwargs is None:
             base_kwargs = {}
@@ -50,6 +60,10 @@ class Policy(nn.Module):
             self.dist = dist
         else:
             self.dist = create_output_distribution(action_space, self.base.output_size)
+
+        self.shape = None
+        if isinstance(obs_space, Tuple):
+            self.shape = (obs_space[0].shape, obs_space[1].shape)
 
     @property
     def is_recurrent(self):
@@ -81,12 +95,14 @@ class Policy(nn.Module):
         return value, action, action_log_probs, rnn_hxs
 
     def get_value(self, inputs, rnn_hxs, masks):
+        inputs = self._try_convert(inputs)
         value, _, _ = self.base(inputs, rnn_hxs, masks)
         return value
 
     def evaluate_actions(self, inputs, rnn_hxs, masks, action):
         # given an sample from the replay buffer, returns the state value,
         # the action log prob (for the chosen action) and the entropy of the distribution
+        inputs = self._try_convert(inputs)
         value, actor_features, rnn_hxs = self.base(inputs, rnn_hxs, masks)
         dist = self.dist(actor_features)
 
@@ -94,6 +110,19 @@ class Policy(nn.Module):
         dist_entropy = dist.entropy().mean()
 
         return value, action_log_probs, dist_entropy, rnn_hxs
+
+    def _try_convert(self, inputs):
+        if self.shape is not None:
+            return _unflatten_tuple(self.shape, inputs)
+        return inputs
+
+
+def _unflatten_tuple(shape, _tensor):
+    """Assumes tensor is 2 dimensional. converts (n,c*h*w+x) -> ((n,c, h, w),(n, x))"""
+    chw = np.prod(shape[0])
+    x = shape[1][0]
+    flat, fc = torch.split(_tensor, [chw, x], dim=1)
+    return flat.view(_tensor.shape[0], *shape[0]), fc
 
 
 class NNBase(nn.Module):
@@ -180,7 +209,7 @@ class NNBase(nn.Module):
 
 
 class CNNBase(NNBase):
-    def __init__(self, num_inputs, recurrent=False, hidden_size=512):
+    def __init__(self, num_inputs, recurrent=False, hidden_size=512, fc_size=0):
         """ num inputs is the number of channels """
         super(CNNBase, self).__init__(recurrent, hidden_size, hidden_size)
 
@@ -199,9 +228,12 @@ class CNNBase(NNBase):
             init_(nn.Conv2d(64, 32, 3, stride=1)),
             nn.ReLU(),
             Flatten(),
-            init_(nn.Linear(32 * 7 * 7, hidden_size)),
-            nn.ReLU(),
         )
+
+        self.fc = nn.Sequential(
+            init_(nn.Linear(32 * 7 * 7 + fc_size, hidden_size)), nn.ReLU()
+        )
+        self.fc_size = fc_size if fc_size else None
 
         init_ = lambda m: init(
             m, nn.init.orthogonal_, lambda x: nn.init.constant_(x, 0)
@@ -212,7 +244,11 @@ class CNNBase(NNBase):
         self.train()
 
     def forward(self, inputs, rnn_hxs, masks):
-        x = self.main(inputs)
+        if self.fc_size is None:
+            x = self.fc(self.main(inputs))
+        else:
+            cnn, fc = inputs
+            x = self.fc(torch.cat((self.main(cnn), fc), dim=1))
 
         if self.is_recurrent:
             x, rnn_hxs = self._forward_gru(x, rnn_hxs, masks)

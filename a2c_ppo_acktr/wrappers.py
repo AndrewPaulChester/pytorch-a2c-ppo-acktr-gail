@@ -3,6 +3,7 @@ import abc
 from collections import OrderedDict
 import numpy as np
 
+from gym.spaces import Tuple
 import torch
 import gtimer as gt
 
@@ -20,7 +21,6 @@ import rlkit.torch.pytorch_util as ptu
 from rlkit.util.multi_queue import MultiQueue
 
 from gym_taxi.utils.spaces import Json
-from gym_taxi.utils.representations import json_to_screen
 
 
 class WrappedPolicy(Policy):
@@ -34,9 +34,10 @@ class WrappedPolicy(Policy):
         deterministic=False,
         dist=None,
         num_processes=1,
+        obs_space=None,
     ):
         super(WrappedPolicy, self).__init__(
-            obs_shape, action_space, base, base_kwargs, dist
+            obs_shape, action_space, base, base_kwargs, dist, obs_space
         )
         self.deterministic = deterministic
         self.rnn_hxs = torch.zeros(num_processes, 1)
@@ -44,7 +45,9 @@ class WrappedPolicy(Policy):
         self.device = device
 
     def get_action(self, inputs, rnn_hxs=None, masks=None):
-        inputs = torch.from_numpy(inputs).float().to(self.device)
+        # print(inputs.shape)
+        # inputs = torch.from_numpy(inputs).float().to(self.device)
+
         if rnn_hxs is None:
             rnn_hxs = self.rnn_hxs
         if masks is None:
@@ -223,6 +226,13 @@ class PPOTrainer(PPO, TorchTrainer):
         return dict(actor_critic=self.actor_critic)
 
 
+def _flatten_tuple(observation):
+    """Assumes observation is a tuple of tensors. converts ((n,c, h, w),(n, x)) -> (n,c*h*w+x)"""
+    image, fc = observation
+    flat = image.view(image.shape[0], -1)
+    return torch.cat((flat, fc), dim=1)
+
+
 class RolloutStepCollector(LogPathCollector):
     def __init__(
         self,
@@ -238,9 +248,24 @@ class RolloutStepCollector(LogPathCollector):
             env, policy, max_num_epoch_paths_saved, render, render_kwargs, num_processes
         )
         self.num_processes = num_processes
+
+        self.device = device
+        self.is_json = isinstance(env.observation_space, Json)
+        self.is_tuple = False
+        if self.is_json:
+            self.json_to_screen = env.observation_space.converter
+            self.is_tuple = isinstance(env.observation_space.image, Tuple)
+
         shape = (
-            env.observation_space.image.shape
-            if isinstance(env.observation_space, Json)
+            (
+                (
+                    env.observation_space.image[0].shape,
+                    env.observation_space.image[1].shape,
+                )
+                if self.is_tuple
+                else env.observation_space.image.shape
+            )
+            if self.is_json
             else env.observation_space.shape
         )
         self._rollouts = RolloutStorage(
@@ -250,14 +275,37 @@ class RolloutStepCollector(LogPathCollector):
             env.action_space,
             1,  # hardcoding reccurent hidden state off for now.
         )
-        obs = env.reset()
-        self.obs = obs
-        self.device = device
-        if isinstance(env.observation_space, Json):
-            obs = np.array([json_to_screen(o[0]) for o in obs])
-        obs = torch.from_numpy(obs).float().to(self.device)
-        self._rollouts.obs[0].copy_(obs)
+
+        raw_obs = env.reset()
+        action_obs = self._convert_to_torch(raw_obs)
+        stored_obs = _flatten_tuple(action_obs) if self.is_tuple else action_obs
+        self.obs = (
+            raw_obs if isinstance(self, HierarchicalStepCollector) else action_obs
+        )
+
+        # print(raw_obs.shape)
+        # print(action_obs.shape)
+        # print(stored_obs.shape)
+
+        self._rollouts.obs[0].copy_(stored_obs)
         self._rollouts.to(self.device)
+
+    def _convert_to_torch(self, raw_obs):
+        if self.is_json:
+            list_of_observations = [self.json_to_screen(o[0]) for o in raw_obs]
+            if self.is_tuple:
+                tuple_of_observation_lists = zip(*list_of_observations)
+                action_obs = tuple(
+                    [
+                        torch.tensor(list_of_observations).float().to(self.device)
+                        for list_of_observations in tuple_of_observation_lists
+                    ]
+                )
+            else:
+                action_obs = torch.tensor(list_of_observations).float().to(self.device)
+        else:
+            action_obs = torch.tensor(raw_obs).float().to(self.device)
+        return action_obs
 
     def get_rollouts(self):
         return self._rollouts
@@ -271,15 +319,14 @@ class RolloutStepCollector(LogPathCollector):
         recurrent_hidden_states = agent_info["rnn_hxs"]
 
         # Observe reward and next obs
-        obs, reward, done, infos = self._env.step(ptu.get_numpy(action))
+        raw_obs, reward, done, infos = self._env.step(ptu.get_numpy(action))
         if self._render:
             self._env.render(**self._render_kwargs)
 
-        self.obs = obs
-        if isinstance(self._env.observation_space, Json):
-            obs = np.array([json_to_screen(o[0]) for o in obs])
+        action_obs = self._convert_to_torch(raw_obs)
+        stored_obs = _flatten_tuple(action_obs) if self.is_tuple else action_obs
+        self.obs = action_obs
 
-        obs = torch.from_numpy(obs).float().to(self.device)
         reward = torch.from_numpy(reward).unsqueeze(dim=1).float()
 
         # If done then clean the history of observations.
@@ -290,7 +337,7 @@ class RolloutStepCollector(LogPathCollector):
         gt.stamp("exploration sampling", unique=False)
 
         self._rollouts.insert(
-            obs,
+            stored_obs,
             recurrent_hidden_states,
             action,
             action_log_prob,
@@ -344,10 +391,10 @@ class HierarchicalStepCollector(RolloutStepCollector):
             action = ptu.tensor([[a] for (a, _), _ in results])
 
             # Observe reward and next obs
-            obs, reward, done, infos = self._env.step(ptu.get_numpy(action))
+            raw_obs, reward, done, infos = self._env.step(ptu.get_numpy(action))
             if self._render:
                 self._env.render(**self._render_kwargs)
-            self.obs = obs
+            self.obs = raw_obs
             self.cumulative_reward += reward
 
             for i, ((a, e), ai) in enumerate(results):
@@ -373,7 +420,7 @@ class HierarchicalStepCollector(RolloutStepCollector):
             z for z in zip(*layer)
         ]
 
-        obs = np.array(obs)
+        raw_obs = np.array(obs)
         recurrent_hidden_states = torch.stack(recurrent_hidden_states, dim=0)
         action = torch.cat(action)
         action_log_prob = torch.cat(action_log_prob)
@@ -381,10 +428,9 @@ class HierarchicalStepCollector(RolloutStepCollector):
         value = torch.cat(value)
         reward = np.array(reward)
 
-        if isinstance(self._env.observation_space, Json):
-            obs = np.array([json_to_screen(o[0]) for o in obs])
+        action_obs = self._convert_to_torch(raw_obs)
+        stored_obs = _flatten_tuple(action_obs) if self.is_tuple else action_obs
 
-        obs = torch.from_numpy(obs).float().to(self.device)
         reward = torch.from_numpy(reward).unsqueeze(dim=1).float()
 
         # If done then clean the history of observations.
@@ -395,7 +441,7 @@ class HierarchicalStepCollector(RolloutStepCollector):
         gt.stamp("exploration sampling", unique=False)
 
         self._rollouts.insert(
-            obs,
+            stored_obs,
             recurrent_hidden_states,
             action,
             action_log_prob,

@@ -1,5 +1,6 @@
 import torch
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
+import numpy as np
 
 
 def _flatten_helper(T, N, _tensor):
@@ -17,7 +18,13 @@ class RolloutStorage(object):
         action_space,
         recurrent_hidden_state_size,
     ):
-        self.obs = torch.zeros(num_steps + 1, num_processes, *obs_shape)
+
+        if isinstance(obs_shape[0], tuple):
+            length = np.prod(obs_shape[0]) + obs_shape[1][0]
+            self.obs = torch.zeros(num_steps + 1, num_processes, length)
+        else:
+            self.obs = torch.zeros(num_steps + 1, num_processes, *obs_shape)
+
         self.recurrent_hidden_states = torch.zeros(
             num_steps + 1, num_processes, recurrent_hidden_state_size
         )
