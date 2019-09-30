@@ -271,19 +271,19 @@ def main(arglist):
             )
 
             # histogram parameters
-            layer = 0
-            for l in actor_critic.base.main:
-                try:
-                    b = l.bias
-                    w = l.weight
-                    logger.record_histogram_dict(
-                        {f"{layer}/bias": b, f"{layer}/weight": w}, prefix="layer"
-                    )
-                    layer += 1
-                except AttributeError:
-                    pass
-            tb_log._log_stats(int(j / args.log_interval))
-            tb_log.expl_data_collector.end_epoch(int(j / args.log_interval))
+            # layer = 0
+            # for l in actor_critic.base.main:
+            #     try:
+            #         b = l.bias
+            #         w = l.weight
+            #         logger.record_histogram_dict(
+            #             {f"{layer}/bias": b, f"{layer}/weight": w}, prefix="layer"
+            #         )
+            #         layer += 1
+            #     except AttributeError:
+            #         pass
+            # tb_log._log_stats(int(j / args.log_interval))
+            # tb_log.expl_data_collector.end_epoch(int(j / args.log_interval))
 
         # evaluate if requested
         if (

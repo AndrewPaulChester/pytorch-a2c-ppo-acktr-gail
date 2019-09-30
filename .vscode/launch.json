@@ -49,7 +49,7 @@
                 "--algo",
                 "ppo",
                 "--use-gae",
-                "--lr",
+                "--learning-rate",
                 "2.5e-4",
                 "--clip-param",
                 "0.1",
@@ -123,6 +123,37 @@
                 "--env-name",
                 "PongNoFrameskip-v4"
             ]
-        }
+        },
+        {
+            "name": "Python: continuous cartpole ppo",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "--env-name",
+                "RoboschoolInvertedPendulum-v1",
+                "--algo",
+                "ppo",
+                "--use-gae",
+                "--lr",
+                "2.5e-4",
+                "--clip-param",
+                "0.1",
+                "--value-loss-coef",
+                "0.5",
+                "--num-processes",
+                "1",
+                "--num-steps",
+                "128",
+                "--num-mini-batch",
+                "4",
+                "--log-interval",
+                "1",
+                "--use-linear-lr-decay",
+                "--entropy-coef",
+                "0.01"
+            ]
+        },
     ]
 }

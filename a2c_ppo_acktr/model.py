@@ -91,7 +91,7 @@ class Policy(nn.Module):
 
         action_log_probs = dist.log_probs(action)
         dist_entropy = dist.entropy().mean()
-
+        # print(action)
         return value, action, action_log_probs, rnn_hxs
 
     def get_value(self, inputs, rnn_hxs, masks):
@@ -248,7 +248,11 @@ class CNNBase(NNBase):
             x = self.fc(self.main(inputs))
         else:
             cnn, fc = inputs
-            x = self.fc(torch.cat((self.main(cnn), fc), dim=1))
+            fc_in = self.main(cnn)
+            # print(
+            #     f"dense max: {fc.max()} min: {fc.min()} cnn_out max: {fc_in.max()} min: {fc_in.min()}"
+            # )
+            x = self.fc(torch.cat((fc_in, fc), dim=1))
 
         if self.is_recurrent:
             x, rnn_hxs = self._forward_gru(x, rnn_hxs, masks)

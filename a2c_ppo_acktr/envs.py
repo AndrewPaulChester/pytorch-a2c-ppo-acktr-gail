@@ -97,8 +97,11 @@ def make_vec_envs(
     else:
         envs = DummyVecEnv(envs)
 
-    if len(envs.observation_space.shape) == 1 and not hasattr(
-        envs.unwrapped.observation_space, "image"
+    # disabling vec normalise as they are fucking confusing.
+    if (
+        False
+        and len(envs.observation_space.shape) == 1
+        and not hasattr(envs.unwrapped.observation_space, "image")
     ):
         if gamma is None:
             envs = VecNormalize(envs, ret=False)
