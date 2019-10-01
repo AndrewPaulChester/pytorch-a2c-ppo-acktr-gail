@@ -209,7 +209,9 @@ class NNBase(nn.Module):
 
 
 class CNNBase(NNBase):
-    def __init__(self, num_inputs, recurrent=False, hidden_size=512, fc_size=0):
+    def __init__(
+        self, num_inputs, recurrent=False, hidden_size=512, fc_size=0, deep=False
+    ):
         """ num inputs is the number of channels """
         super(CNNBase, self).__init__(recurrent, hidden_size, hidden_size)
 
@@ -230,9 +232,17 @@ class CNNBase(NNBase):
             Flatten(),
         )
 
-        self.fc = nn.Sequential(
-            init_(nn.Linear(32 * 7 * 7 + fc_size, hidden_size)), nn.ReLU()
-        )
+        if deep:
+            self.fc = nn.Sequential(
+                init_(nn.Linear(32 * 7 * 7 + fc_size, hidden_size)),
+                nn.ReLU(),
+                init_(nn.Linear(hidden_size, hidden_size)),
+                nn.ReLU(),
+            )
+        else:
+            self.fc = nn.Sequential(
+                init_(nn.Linear(32 * 7 * 7 + fc_size, hidden_size)), nn.ReLU()
+            )
         self.fc_size = fc_size if fc_size else None
 
         init_ = lambda m: init(
