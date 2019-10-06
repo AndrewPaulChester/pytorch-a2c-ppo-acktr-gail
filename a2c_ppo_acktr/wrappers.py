@@ -212,6 +212,22 @@ class PPOTrainer(PPO, TorchTrainer):
         # re-initialise experience buffer with current state
         batch.after_update()
 
+        """
+        Save some statistics for eval
+        """
+        print(
+            f"value loss {value_loss}, action loss {action_loss}, dist_entropy {dist_entropy}"
+        )
+        if self._need_to_update_eval_statistics:
+            self._need_to_update_eval_statistics = False
+            """
+            Eval should set this to None.
+            This way, these statistics are only computed for one batch.
+            """
+            self.eval_statistics["Value Loss"] = value_loss
+            self.eval_statistics["Action Loss"] = action_loss
+            self.eval_statistics["Distribution Entropy"] = dist_entropy
+
     def get_diagnostics(self):
         return self.eval_statistics
 
@@ -409,7 +425,7 @@ class HierarchicalStepCollector(RolloutStepCollector):
                     if done[i]:
                         self._policy.reset(i)
                     self.obs_queue.add_item(
-                        (obs[i], self.cumulative_reward[i], done[i], infos[i]), i
+                        (self.obs[i], self.cumulative_reward[i], done[i], infos[i]), i
                     )
                     self.cumulative_reward[i] = 0
 
