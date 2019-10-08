@@ -44,7 +44,7 @@ class WrappedPolicy(Policy):
         self.masks = torch.ones(num_processes, 1)
         self.device = device
 
-    def get_action(self, inputs, rnn_hxs=None, masks=None):
+    def get_action(self, inputs, rnn_hxs=None, masks=None, valid_envs=None):
         # print(inputs.shape)
         # inputs = torch.from_numpy(inputs).float().to(self.device)
 
@@ -326,7 +326,7 @@ class RolloutStepCollector(LogPathCollector):
     def get_rollouts(self):
         return self._rollouts
 
-    def collect_one_step(self, step):
+    def collect_one_step(self, step, step_total):
         with torch.no_grad():
             (action, explored), agent_info = self._policy.get_action(self.obs)
 
@@ -389,7 +389,7 @@ class HierarchicalStepCollector(RolloutStepCollector):
         self.obs_queue = MultiQueue(num_processes)
         self.cumulative_reward = np.zeros(num_processes)
 
-    def collect_one_step(self, step):
+    def collect_one_step(self, step, step_total):
         """
         This needs to handle the fact that different environments can have different plan lengths, and so the macro steps are not in sync. 
 
@@ -398,16 +398,28 @@ class HierarchicalStepCollector(RolloutStepCollector):
             multiple queued experiences for some environments
             identifying termination
 
+        While there is an environment which hasn't completed one macro-step, it takes simultaneous steps in all environments.
+        Keeps two queues, action and observation, which correspond to the start and end of the macro step.
+        Each environment is checked to see if the current information should be added to the action or observation queues.
+        When the observation queue (which is always 0-1 steps behind the action queue) has an action for all environments, these
+        are retrieved and inserted in the rollout storage.
+
+        To ensure that environments stay on policy (i.e. we don't queue up lots of old experience in the buffer), and we don't plan more 
+        than required, each step we check to see if any environments have enough experience for this epoch, and if so we execute a no-op.
         """
+        remaining = step_total - step
+
+        step_count = 0
         while not self.obs_queue.check_layer():
+            print(remaining, step_total, step)
+            valid_envs = [len(q) < remaining for q in self.obs_queue.queues]
+            print(valid_envs)
             with torch.no_grad():
-                results = self._policy.get_action(
-                    self.obs
-                )  # TODO: reset action queue for learner agent when environment is solved.
-            action = ptu.tensor([[a] for (a, _), _ in results])
+                results = self._policy.get_action(self.obs, valid_envs=valid_envs)
+            action = np.array([[a] for (a, _), _ in results])
 
             # Observe reward and next obs
-            raw_obs, reward, done, infos = self._env.step(ptu.get_numpy(action))
+            raw_obs, reward, done, infos = self._env.step(action)
             if self._render:
                 self._env.render(**self._render_kwargs)
             self.obs = raw_obs
@@ -428,6 +440,13 @@ class HierarchicalStepCollector(RolloutStepCollector):
                         (self.obs[i], self.cumulative_reward[i], done[i], infos[i]), i
                     )
                     self.cumulative_reward[i] = 0
+            step_count += 1
+            print(step_count)
+
+        [
+            print(f"obs queue layer {i} length {len(q)}")
+            for i, q in enumerate(self.obs_queue.queues)
+        ]
 
         o_layer = self.obs_queue.pop_layer()
         a_layer = self.action_queue.pop_layer()
@@ -528,7 +547,9 @@ class IkostrikovRLAlgorithm(BaseRLAlgorithm, metaclass=abc.ABCMeta):
                     self.trainer.decay_lr(epoch, self.num_epochs)
 
                 for step in range(self.num_expl_steps_per_train_loop):
-                    self.expl_data_collector.collect_one_step(step)
+                    self.expl_data_collector.collect_one_step(
+                        step, self.num_expl_steps_per_train_loop
+                    )
                     gt.stamp("data storing", unique=False)
 
                 rollouts = self.expl_data_collector.get_rollouts()
