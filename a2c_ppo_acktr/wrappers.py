@@ -411,11 +411,12 @@ class HierarchicalStepCollector(RolloutStepCollector):
 
         step_count = 0
         while not self.obs_queue.check_layer():
-            print(remaining, step_total, step)
+            # print(remaining, step_total, step)
             valid_envs = [len(q) < remaining for q in self.obs_queue.queues]
-            print(valid_envs)
+            # print(valid_envs)
             with torch.no_grad():
                 results = self._policy.get_action(self.obs, valid_envs=valid_envs)
+                # print(results)
             action = np.array([[a] for (a, _), _ in results])
 
             # Observe reward and next obs
@@ -433,7 +434,7 @@ class HierarchicalStepCollector(RolloutStepCollector):
                         (ai["rnn_hxs"][i], ai["subgoal"], ai["probs"], e, ai["value"]),
                         i,
                     )
-                if done[i] or "empty" in ai:
+                if (done[i] and valid_envs[i]) or "empty" in ai:
                     if done[i]:
                         self._policy.reset(i)
                     self.obs_queue.add_item(
@@ -441,13 +442,16 @@ class HierarchicalStepCollector(RolloutStepCollector):
                     )
                     self.cumulative_reward[i] = 0
             step_count += 1
-            print(step_count)
+            # print(step_count)
 
-        [
-            print(f"obs queue layer {i} length {len(q)}")
-            for i, q in enumerate(self.obs_queue.queues)
-        ]
-
+        # [
+        #     print(f"obs queue layer {i} length {len(q)}")
+        #     for i, q in enumerate(self.obs_queue.queues)
+        # ]
+        # [
+        #     print(f"action queue layer {i} length {len(q)}")
+        #     for i, q in enumerate(self.action_queue.queues)
+        # ]
         o_layer = self.obs_queue.pop_layer()
         a_layer = self.action_queue.pop_layer()
         layer = [o + a for o, a in zip(o_layer, a_layer)]
@@ -537,7 +541,9 @@ class IkostrikovRLAlgorithm(BaseRLAlgorithm, metaclass=abc.ABCMeta):
         ):
 
             for step in range(self.num_eval_steps_per_epoch):
-                self.eval_data_collector.collect_one_step(step)
+                self.eval_data_collector.collect_one_step(
+                    step, self.num_eval_steps_per_epoch
+                )
             gt.stamp("evaluation sampling")
 
             for _ in range(self.num_train_loops_per_epoch):
