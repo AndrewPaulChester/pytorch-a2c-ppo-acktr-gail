@@ -29,6 +29,7 @@ FixedCategorical.log_probs = (
 )
 
 FixedCategorical.mode = lambda self: self.probs.argmax(dim=-1, keepdim=True)
+FixedCategorical.get_probs = lambda self: self.probs
 
 # Normal
 FixedNormal = torch.distributions.Normal
@@ -42,6 +43,7 @@ normal_entropy = FixedNormal.entropy
 FixedNormal.entropy = lambda self: normal_entropy(self).sum(-1)
 
 FixedNormal.mode = lambda self: self.mean
+FixedNormal.get_probs = lambda self: self.mean
 
 # Bernoulli
 FixedBernoulli = torch.distributions.Bernoulli
@@ -57,6 +59,7 @@ FixedBernoulli.log_probs = (
 bernoulli_entropy = FixedBernoulli.entropy
 FixedBernoulli.entropy = lambda self: bernoulli_entropy(self).sum(-1)
 FixedBernoulli.mode = lambda self: torch.gt(self.probs, 0.5).float()
+FixedBernoulli.get_probs = lambda self: self.probs
 
 
 class Categorical(nn.Module):
@@ -150,4 +153,7 @@ class DistributionTuple:
 
     def entropy(self):
         return sum([d.entropy() for d in self.distributions])
+
+    def get_probs(self):
+        return torch.cat([d.get_probs() for d in self.distributions], dim=1)
 

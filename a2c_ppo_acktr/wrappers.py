@@ -53,11 +53,16 @@ class WrappedPolicy(Policy):
         if masks is None:
             masks = self.masks
 
-        value, action, action_log_probs, rnn_hxs = self.act(
+        value, action, action_log_probs, rnn_hxs, probs = self.act(
             inputs, rnn_hxs, masks, self.deterministic
         )  # Need to be careful about rnn and masks - won't work for recursive
 
-        agent_info = {"value": value, "probs": action_log_probs, "rnn_hxs": rnn_hxs}
+        agent_info = {
+            "value": value,
+            "probs": action_log_probs,
+            "rnn_hxs": rnn_hxs,
+            "dist": probs,
+        }
         explored = action_log_probs < math.log(0.5)
         # return value, action, action_log_probs, rnn_hxs
         return (action, explored), agent_info
@@ -431,7 +436,14 @@ class HierarchicalStepCollector(RolloutStepCollector):
                     self.cumulative_reward[i] -= 10
                 if "subgoal" in ai:
                     self.action_queue.add_item(
-                        (ai["rnn_hxs"][i], ai["subgoal"], ai["probs"], e, ai["value"]),
+                        (
+                            ai["rnn_hxs"][i],
+                            ai["subgoal"],
+                            ai["probs"],
+                            e,
+                            ai["value"],
+                            ai,
+                        ),
                         i,
                     )
                 if (done[i] and valid_envs[i]) or "empty" in ai:
@@ -455,7 +467,7 @@ class HierarchicalStepCollector(RolloutStepCollector):
         o_layer = self.obs_queue.pop_layer()
         a_layer = self.action_queue.pop_layer()
         layer = [o + a for o, a in zip(o_layer, a_layer)]
-        obs, reward, done, infos, recurrent_hidden_states, action, action_log_prob, explored, value = [
+        obs, reward, done, infos, recurrent_hidden_states, action, action_log_prob, explored, value, agent_info = [
             z for z in zip(*layer)
         ]
 
@@ -489,7 +501,7 @@ class HierarchicalStepCollector(RolloutStepCollector):
             masks,
             bad_masks,
         )
-        self.add_step(action, action_log_prob, reward, done, value)
+        self.add_step(action, action_log_prob, reward, done, value, agent_info)
 
 
 class IkostrikovRLAlgorithm(BaseRLAlgorithm, metaclass=abc.ABCMeta):

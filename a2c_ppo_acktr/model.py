@@ -91,8 +91,9 @@ class Policy(nn.Module):
 
         action_log_probs = dist.log_probs(action)
         dist_entropy = dist.entropy().mean()
+        probs = dist.get_probs()
         # print(action)
-        return value, action, action_log_probs, rnn_hxs
+        return value, action, action_log_probs, rnn_hxs, probs
 
     def get_value(self, inputs, rnn_hxs, masks):
         inputs = self._try_convert(inputs)
