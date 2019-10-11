@@ -132,7 +132,7 @@ class DistributionTuple:
         return torch.cat([d.mode() for d in self.distributions], 1)
 
     def sample(self):
-        return torch.cat([d.sample() for d in self.distributions], 1)
+        return torch.cat([d.sample().float() for d in self.distributions], 1)
 
     def log_probs(self, action):
         # lp = [d.log_probs(a) for a, d in zip(action, self.distributions)]
@@ -140,7 +140,10 @@ class DistributionTuple:
         max_index = 0
         log_prob = 0
         for d in self.distributions:
-            max_index += d.batch_shape[1]
+            if len(d.batch_shape) == 1:
+                max_index += 1
+            else:
+                max_index += d.batch_shape[1]
             log_prob += d.log_probs(action[:, min_index:max_index])
             min_index = max_index
         return log_prob
