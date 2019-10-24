@@ -19,6 +19,7 @@ from rlkit.core.rl_algorithm import BaseRLAlgorithm
 from rlkit.data_management.replay_buffer import ReplayBuffer
 import rlkit.torch.pytorch_util as ptu
 from rlkit.util.multi_queue import MultiQueue
+import rlkit.pythonplusplus as ppp
 
 from gym_taxi.utils.spaces import Json
 
@@ -334,6 +335,9 @@ class RolloutStepCollector(LogPathCollector):
     def collect_one_step(self, step, step_total):
         with torch.no_grad():
             (action, explored), agent_info = self._policy.get_action(self.obs)
+        # print(action)
+        # print(explored)
+        # print(agent_info)
 
         value = agent_info["value"]
         action_log_prob = agent_info["probs"]
@@ -367,7 +371,11 @@ class RolloutStepCollector(LogPathCollector):
             masks,
             bad_masks,
         )
-        self.add_step(action, action_log_prob, reward, done, value)
+        gt.stamp("data storing", unique=False)
+        flat_ai = ppp.dict_of_list__to__list_of_dicts(agent_info, len(action))
+        gt.stamp("flattening", unique=False)
+        # print(flat_ai)
+        self.add_step(action, action_log_prob, reward, done, value, flat_ai)
 
 
 class HierarchicalStepCollector(RolloutStepCollector):
@@ -433,7 +441,7 @@ class HierarchicalStepCollector(RolloutStepCollector):
 
             for i, ((a, e), ai) in enumerate(results):
                 if ai.get("failed"):  # add a penalty for failing to generate a plan
-                    self.cumulative_reward[i] -= 10
+                    self.cumulative_reward[i] -= 0.5
                 if "subgoal" in ai:
                     self.action_queue.add_item(
                         (
