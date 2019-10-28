@@ -5,7 +5,12 @@ import torch.nn.functional as F
 
 from gym.spaces import Tuple
 
-from a2c_ppo_acktr.distributions import Bernoulli, Categorical, DiagGaussian
+from a2c_ppo_acktr.distributions import (
+    Bernoulli,
+    Categorical,
+    DiagGaussian,
+    DistributionGeneratorTuple,
+)
 from a2c_ppo_acktr.utils import init
 
 
@@ -22,6 +27,15 @@ def create_output_distribution(action_space, output_size):
     elif action_space.__class__.__name__ == "MultiDiscrete":
         num_outputs = action_space.shape[0]
         dist = DiagGaussian(output_size, num_outputs)
+
+    elif action_space.__class__.__name__ == "Tuple":
+        dists = [
+            create_output_distribution(space, output_size) for space in action_space
+        ]
+        # for space in action_space:
+        #     print(action_space.__class__.__name__)
+
+        dist = DistributionGeneratorTuple(tuple(dists))
     else:
         raise NotImplementedError
     return dist
