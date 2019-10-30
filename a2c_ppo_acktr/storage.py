@@ -44,6 +44,8 @@ class RolloutStorage(object):
         # Masks that indicate whether it's a true terminal state
         # or time limit end state
         self.bad_masks = torch.ones(num_steps + 1, num_processes, 1)
+        self.plan_length = torch.ones(num_steps, num_processes, 1)
+        self.gamma = torch.ones(num_processes, 1)
 
         self.num_steps = num_steps
         self.step = 0
@@ -59,6 +61,8 @@ class RolloutStorage(object):
         self.actions = self.actions.to(device)
         self.masks = self.masks.to(device)
         self.bad_masks = self.bad_masks.to(device)
+        self.plan_length = self.plan_length.to(device)
+        self.gamma = self.gamma.to(device)
 
     def insert(
         self,
@@ -70,9 +74,12 @@ class RolloutStorage(object):
         rewards,
         masks,
         bad_masks,
+        plan_length=None,
     ):
         """Inserts a new transition into the experience buffer"""
         self.obs[self.step + 1].copy_(obs)
+        print(self.recurrent_hidden_states.shape)
+        print(recurrent_hidden_states.shape)
         self.recurrent_hidden_states[self.step + 1].copy_(recurrent_hidden_states)
         self.actions[self.step].copy_(actions)
         self.action_log_probs[self.step].copy_(action_log_probs)
@@ -80,6 +87,8 @@ class RolloutStorage(object):
         self.rewards[self.step].copy_(rewards)
         self.masks[self.step + 1].copy_(masks)
         self.bad_masks[self.step + 1].copy_(bad_masks)
+        if plan_length is not None:
+            self.plan_length[self.step].copy_(plan_length)
 
         self.step = (self.step + 1) % self.num_steps
 
@@ -94,6 +103,7 @@ class RolloutStorage(object):
         self, next_value, use_gae, gamma, gae_lambda, use_proper_time_limits=True
     ):
         """ Calculates the discounted returns at each time step from rewards"""
+        self.gamma.fill_(gamma)
         if use_proper_time_limits:
             if use_gae:
                 self.value_preds[-1] = next_value
@@ -101,10 +111,18 @@ class RolloutStorage(object):
                 for step in reversed(range(self.rewards.size(0))):
                     delta = (
                         self.rewards[step]
-                        + gamma * self.value_preds[step + 1] * self.masks[step + 1]
+                        + torch.pow(self.gamma, self.plan_length[step])
+                        * self.value_preds[step + 1]
+                        * self.masks[step + 1]
                         - self.value_preds[step]
                     )
-                    gae = delta + gamma * gae_lambda * self.masks[step + 1] * gae
+                    gae = (
+                        delta
+                        + torch.pow(self.gamma, self.plan_length[step])
+                        * gae_lambda
+                        * self.masks[step + 1]
+                        * gae
+                    )
                     gae = gae * self.bad_masks[step + 1]
                     self.returns[step] = gae + self.value_preds[step]
             else:
@@ -112,7 +130,9 @@ class RolloutStorage(object):
                 for step in reversed(range(self.rewards.size(0))):
                     self.returns[step] = (
                         (
-                            self.returns[step + 1] * gamma * self.masks[step + 1]
+                            self.returns[step + 1]
+                            * torch.pow(self.gamma, self.plan_length[step])
+                            * self.masks[step + 1]
                             + self.rewards[step]
                         )
                         * self.bad_masks[step + 1]
@@ -125,16 +145,26 @@ class RolloutStorage(object):
                 for step in reversed(range(self.rewards.size(0))):
                     delta = (
                         self.rewards[step]
-                        + gamma * self.value_preds[step + 1] * self.masks[step + 1]
+                        + torch.pow(self.gamma, self.plan_length[step])
+                        * self.value_preds[step + 1]
+                        * self.masks[step + 1]
                         - self.value_preds[step]
                     )
-                    gae = delta + gamma * gae_lambda * self.masks[step + 1] * gae
+                    gae = (
+                        delta
+                        + torch.pow(self.gamma, self.plan_length[step])
+                        * gae_lambda
+                        * self.masks[step + 1]
+                        * gae
+                    )
                     self.returns[step] = gae + self.value_preds[step]
             else:
                 self.returns[-1] = next_value
                 for step in reversed(range(self.rewards.size(0))):
                     self.returns[step] = (
-                        self.returns[step + 1] * gamma * self.masks[step + 1]
+                        self.returns[step + 1]
+                        * torch.pow(self.gamma, self.plan_length[step])
+                        * self.masks[step + 1]
                         + self.rewards[step]
                     )
 

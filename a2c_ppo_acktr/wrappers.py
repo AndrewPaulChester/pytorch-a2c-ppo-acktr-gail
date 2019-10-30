@@ -388,6 +388,8 @@ class HierarchicalStepCollector(RolloutStepCollector):
         render=False,
         render_kwargs=None,
         num_processes=1,
+        gamma=1,
+        no_plan_penalty=False,
     ):
         super().__init__(
             env,
@@ -401,6 +403,10 @@ class HierarchicalStepCollector(RolloutStepCollector):
         self.action_queue = MultiQueue(num_processes)
         self.obs_queue = MultiQueue(num_processes)
         self.cumulative_reward = np.zeros(num_processes)
+        self.discounts = np.ones(num_processes)
+        self.plan_length = np.zeros(num_processes)
+        self.gamma = gamma
+        self.no_plan_penalty = no_plan_penalty
 
     def collect_one_step(self, step, step_total):
         """
@@ -429,39 +435,48 @@ class HierarchicalStepCollector(RolloutStepCollector):
             # print(valid_envs)
             with torch.no_grad():
                 results = self._policy.get_action(self.obs, valid_envs=valid_envs)
-                # print(results)
-            action = np.array([[a] for (a, _), _ in results])
 
+            action = np.array([[a] for (a, _), _ in results])
+            # print(f"actions: {action}")
             # Observe reward and next obs
             raw_obs, reward, done, infos = self._env.step(action)
             if self._render:
                 self._env.render(**self._render_kwargs)
             self.obs = raw_obs
-            self.cumulative_reward += reward
+            self.discounts *= self.gamma
+            self.plan_length += 1
+            self.cumulative_reward += reward * self.discounts
+            # print("results now")
 
             for i, ((a, e), ai) in enumerate(results):
-                if ai.get("failed"):  # add a penalty for failing to generate a plan
+                # print(f"results: {i}, {((a, e), ai)}")
+                if (
+                    ai.get("failed") and not self.no_plan_penalty
+                ):  # add a penalty for failing to generate a plan
                     self.cumulative_reward[i] -= 0.5
                 if "subgoal" in ai:
                     self.action_queue.add_item(
-                        (
-                            ai["rnn_hxs"][i],
-                            ai["subgoal"],
-                            ai["probs"],
-                            e,
-                            ai["value"],
-                            ai,
-                        ),
+                        (ai["rnn_hxs"], ai["subgoal"], ai["probs"], e, ai["value"], ai),
                         i,
                     )
                 if (done[i] and valid_envs[i]) or "empty" in ai:
                     if done[i]:
                         self._policy.reset(i)
                     self.obs_queue.add_item(
-                        (self.obs[i], self.cumulative_reward[i], done[i], infos[i]), i
+                        (
+                            self.obs[i],
+                            self.cumulative_reward[i],
+                            done[i],
+                            infos[i],
+                            self.plan_length[i],
+                        ),
+                        i,
                     )
                     self.cumulative_reward[i] = 0
+                    self.discounts[i] = 1
+                    self.plan_length[i] = 0
             step_count += 1
+            # print("results done")
             # print(step_count)
 
         # [
@@ -475,22 +490,24 @@ class HierarchicalStepCollector(RolloutStepCollector):
         o_layer = self.obs_queue.pop_layer()
         a_layer = self.action_queue.pop_layer()
         layer = [o + a for o, a in zip(o_layer, a_layer)]
-        obs, reward, done, infos, recurrent_hidden_states, action, action_log_prob, explored, value, agent_info = [
+        obs, reward, done, infos, plan_length, recurrent_hidden_states, action, action_log_prob, explored, value, agent_info = [
             z for z in zip(*layer)
         ]
 
         raw_obs = np.array(obs)
-        recurrent_hidden_states = torch.stack(recurrent_hidden_states, dim=0)
+        recurrent_hidden_states = torch.cat(recurrent_hidden_states)
         action = torch.cat(action)
         action_log_prob = torch.cat(action_log_prob)
         explored = torch.cat(explored)
         value = torch.cat(value)
         reward = np.array(reward)
+        plan_length = np.array(plan_length)
 
         action_obs = self._convert_to_torch(raw_obs)
         stored_obs = _flatten_tuple(action_obs) if self.is_tuple else action_obs
 
         reward = torch.from_numpy(reward).unsqueeze(dim=1).float()
+        plan_length = torch.from_numpy(plan_length).unsqueeze(dim=1).float()
 
         # If done then clean the history of observations.
         masks = torch.FloatTensor([[0.0] if done_ else [1.0] for done_ in done])
@@ -508,8 +525,12 @@ class HierarchicalStepCollector(RolloutStepCollector):
             reward,
             masks,
             bad_masks,
+            plan_length,
         )
         self.add_step(action, action_log_prob, reward, done, value, agent_info)
+
+    def get_snapshot(self):
+        return dict(env=self._env, policy=self._policy.learner)
 
 
 class IkostrikovRLAlgorithm(BaseRLAlgorithm, metaclass=abc.ABCMeta):
