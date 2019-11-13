@@ -607,6 +607,34 @@ class IkostrikovRLAlgorithm(BaseRLAlgorithm, metaclass=abc.ABCMeta):
 
             self._end_epoch(epoch)
 
+    def evaluate(self):
+        self._start_epoch = 0
+        self.training_mode(False)
+
+        for epoch in gt.timed_for(
+            range(self._start_epoch, self.num_epochs), save_itrs=True
+        ):
+
+            for step in range(self.num_eval_steps_per_epoch):
+                self.eval_data_collector.collect_one_step(
+                    step, self.num_eval_steps_per_epoch
+                )
+            gt.stamp("evaluation sampling")
+
+            for _ in range(self.num_train_loops_per_epoch):
+                # this if check could be moved inside the function
+                if self.use_linear_lr_decay:
+                    # decrease learning rate linearly
+                    self.trainer.decay_lr(epoch, self.num_epochs)
+
+                for step in range(self.num_expl_steps_per_train_loop):
+                    self.expl_data_collector.collect_one_step(
+                        step, self.num_expl_steps_per_train_loop
+                    )
+                    gt.stamp("data storing", unique=False)
+
+            self._end_epoch(epoch)
+
 
 class TorchIkostrikovRLAlgorithm(IkostrikovRLAlgorithm):
     def to(self, device):

@@ -78,8 +78,6 @@ class RolloutStorage(object):
     ):
         """Inserts a new transition into the experience buffer"""
         self.obs[self.step + 1].copy_(obs)
-        print(self.recurrent_hidden_states.shape)
-        print(recurrent_hidden_states.shape)
         self.recurrent_hidden_states[self.step + 1].copy_(recurrent_hidden_states)
         self.actions[self.step].copy_(actions)
         self.action_log_probs[self.step].copy_(action_log_probs)

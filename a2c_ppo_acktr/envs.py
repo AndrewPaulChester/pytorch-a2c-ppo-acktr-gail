@@ -18,11 +18,6 @@ except ImportError:
     pass
 
 try:
-    import roboschool
-except ImportError:
-    pass
-
-try:
     import pybullet_envs
 except ImportError:
     pass
