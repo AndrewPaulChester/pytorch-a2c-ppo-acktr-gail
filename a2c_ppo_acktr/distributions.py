@@ -132,9 +132,10 @@ class DistributionTuple:
         self.distributions = distributions
 
     def mode(self):
-        return torch.cat([d.mode() for d in self.distributions], 1)
+        return torch.cat([d.mode().float() for d in self.distributions], 1)
 
     def sample(self):
+        # print(f"mean={self.distributions[1].mean}, sd={self.distributions[1].stddev}")
         return torch.cat([d.sample().float() for d in self.distributions], 1)
 
     def log_probs(self, action):

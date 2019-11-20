@@ -580,12 +580,14 @@ class IkostrikovRLAlgorithm(BaseRLAlgorithm, metaclass=abc.ABCMeta):
         for epoch in gt.timed_for(
             range(self._start_epoch, self.num_epochs), save_itrs=True
         ):
-
+            print(f"in train, with eval to go: {self.num_eval_steps_per_epoch}")
             for step in range(self.num_eval_steps_per_epoch):
+
                 self.eval_data_collector.collect_one_step(
                     step, self.num_eval_steps_per_epoch
                 )
             gt.stamp("evaluation sampling")
+            print("done with eval")
 
             for _ in range(self.num_train_loops_per_epoch):
                 # this if check could be moved inside the function
