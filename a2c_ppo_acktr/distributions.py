@@ -132,6 +132,7 @@ class DistributionTuple:
         self.distributions = distributions
 
     def mode(self):
+        # print(f"mean={self.distributions[1].mean}, sd={self.distributions[1].stddev}")
         return torch.cat([d.mode().float() for d in self.distributions], 1)
 
     def sample(self):
