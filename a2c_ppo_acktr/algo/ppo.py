@@ -92,6 +92,10 @@ class PPO:
                 )
                 self.optimizer.step()
 
+                # for l in self.actor_critic.parameters():
+                #     print(l.mean())
+                #     print(l.grad.mean())
+
                 value_loss_epoch += value_loss.item()
                 action_loss_epoch += action_loss.item()
                 dist_entropy_epoch += dist_entropy.item()
