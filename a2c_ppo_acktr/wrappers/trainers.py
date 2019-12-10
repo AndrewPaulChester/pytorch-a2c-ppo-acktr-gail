@@ -181,3 +181,40 @@ class PPOTrainer(PPO, TorchTrainer):
 
     def get_snapshot(self):
         return dict(actor_critic=self.actor_critic)
+
+
+class MultiTrainer:
+    def __init__(self, trainers):
+        self.trainers = trainers
+
+    def decay_lr(self, epoch, num_epochs):
+        for trainer in self.trainers:
+            trainer.decay_lr(epoch, num_epochs)
+
+    def train(self, batches):
+        for trainer, batch in zip(self.trainers, batches):
+            if batch:
+                # TODO: this needs to be expanded so the higher level only trains on full batches
+                trainer.train(batch)
+
+    def get_diagnostics(self):
+        return [
+            trainer.eval_statistics() for trainer in self.trainers
+        ]  # this returns a list which may break things
+
+    def end_epoch(self, epoch):
+        for trainer in self.trainers:
+            trainer.end_epoch(epoch)
+
+    @property
+    def networks(self):
+        n = []
+        for trainer in self.trainers:
+            n.extend(trainer.networks)
+        return n
+
+    def get_snapshot(self):
+        return [
+            trainer.get_snapshot() for trainer in self.trainers
+        ]  # this returns a list which may break things
+

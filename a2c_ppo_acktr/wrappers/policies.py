@@ -1,8 +1,10 @@
 import math
 
 import torch
+import torch.nn as nn
 
-from a2c_ppo_acktr.model import Policy
+from a2c_ppo_acktr.utils import init
+from a2c_ppo_acktr.model import Policy, create_output_distribution
 
 
 class WrappedPolicy(Policy):
@@ -52,3 +54,99 @@ class WrappedPolicy(Policy):
     def reset(self):
         pass
 
+
+class MultiPolicy(WrappedPolicy):
+    def __init__(
+        self,
+        obs_shape,
+        action_space,
+        device,
+        num_options,
+        base=None,
+        base_kwargs=None,
+        deterministic=False,
+        dist=None,
+        num_processes=1,
+        obs_space=None,
+    ):
+        super(MultiPolicy, self).__init__(
+            obs_shape,
+            action_space,
+            device,
+            base,
+            base_kwargs,
+            deterministic,
+            dist,
+            num_processes,
+            obs_space,
+        )
+        self.num_options = num_options
+        self.dist = None
+        init_ = lambda m: init(
+            m, nn.init.orthogonal_, lambda x: nn.init.constant_(x, 0)
+        )
+
+        self.critics = nn.ModuleList(
+            [init_(nn.Linear(base._hidden_size, 1)) for i in range(num_options)]
+        )
+        self.dists = nn.ModuleList(
+            [
+                create_output_distribution(action_space, self.base.output_size)
+                for i in range(num_options)
+            ]
+        )
+        self.action = torch.zeros(num_processes).to(device)
+        self.action_log_probs = torch.zeros(num_processes).to(device)
+        self.probs = torch.zeros(num_processes, action_space.n).to(device)
+
+    def act(self, inputs, rnn_hxs, masks, deterministic=False):
+        """Expects first number in the inputs to be the option index"""
+        options = inputs[0]
+        inputs = inputs[1]
+        # calls CNN or MLP base. Rnn HXS is unused if not recurrent
+        # value is critic output, actor features are actor output.
+        value, actor_features, rnn_hxs = self.base(inputs, rnn_hxs, masks)
+        # dist is output distribution (varies depending on action space)
+        for i, o in enumerate(options):
+            value[i] = self.critics[o](actor_features[i])
+            dist = self.dists[o](actor_features[i])
+
+            if deterministic:
+                self.action[i] = dist.mode()
+            else:
+                self.action[i] = dist.sample()
+
+            self.action_log_probs[i] = dist.log_probs(self.action)
+            self.probs[i] = dist.get_probs()
+
+        # print(action)
+        return value, self.action, self.action_log_probs, rnn_hxs, self.probs
+
+    def get_value(self, inputs, rnn_hxs, masks):
+        options = inputs[:, 0]
+        inputs = inputs[:, 1:]
+        inputs = self._try_convert(inputs)
+        value, actor_features, _ = self.base(inputs, rnn_hxs, masks)
+        for i, o in enumerate(options):
+            value[i] = self.critics[o](actor_features[i])
+        return value
+
+    def evaluate_actions(self, inputs, rnn_hxs, masks, action):
+        # given an sample from the replay buffer, returns the state value,
+        # the action log prob (for the chosen action) and the entropy of the distribution
+
+        options = inputs[:, 0]
+        inputs = inputs[:, 1:]
+        inputs = self._try_convert(inputs)
+        value, actor_features, rnn_hxs = self.base(inputs, rnn_hxs, masks)
+
+        dist_entropy = torch.zeros(self.num_options)
+        action_log_probs = torch.zeros(self.num_options)
+        for i, o in enumerate(options):
+            value[i] = self.critics[o](actor_features[i])
+            dist = self.dists[o](actor_features[i])
+
+            action_log_probs[i] = dist.log_probs(action[i])
+            dist_entropy[i] = dist.entropy().mean()
+
+        return value, action_log_probs, dist_entropy, rnn_hxs
