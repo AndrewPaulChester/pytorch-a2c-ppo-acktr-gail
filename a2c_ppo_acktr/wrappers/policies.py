@@ -19,9 +19,16 @@ class WrappedPolicy(Policy):
         dist=None,
         num_processes=1,
         obs_space=None,
+        symbolic_action_size=0,
     ):
         super(WrappedPolicy, self).__init__(
-            obs_shape, action_space, base, base_kwargs, dist, obs_space
+            obs_shape,
+            action_space,
+            base,
+            base_kwargs,
+            dist,
+            obs_space,
+            symbolic_action_size,
         )
         self.deterministic = deterministic
         self.rnn_hxs = torch.zeros(num_processes, 1)

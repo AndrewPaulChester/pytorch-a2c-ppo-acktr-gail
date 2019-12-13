@@ -5,6 +5,7 @@ from a2c_ppo_acktr.algo.a2c_acktr import A2C_ACKTR
 from a2c_ppo_acktr.algo.ppo import PPO
 from a2c_ppo_acktr import utils
 from rlkit.torch.torch_rl_algorithm import TorchTrainer
+from a2c_ppo_acktr.storage import AsyncRollouts
 
 
 class A2CTrainer(A2C_ACKTR, TorchTrainer):
@@ -193,14 +194,19 @@ class MultiTrainer:
 
     def train(self, batches):
         for trainer, batch in zip(self.trainers, batches):
-            if batch:
+            if isinstance(batch, AsyncRollouts):
+                if batch.max_step == batch.num_steps - 1:
+                    trainer.train(batch)
+            else:
                 # TODO: this needs to be expanded so the higher level only trains on full batches
                 trainer.train(batch)
 
     def get_diagnostics(self):
-        return [
-            trainer.eval_statistics() for trainer in self.trainers
-        ]  # this returns a list which may break things
+        # TODO: Currently only returning one diagnostic - need to merge dictionary
+        return self.trainers[0].eval_statistics
+        # return [
+        #     trainer.eval_statistics for trainer in self.trainers
+        # ]  # this returns a list which may break things
 
     def end_epoch(self, epoch):
         for trainer in self.trainers:
@@ -214,7 +220,9 @@ class MultiTrainer:
         return n
 
     def get_snapshot(self):
-        return [
-            trainer.get_snapshot() for trainer in self.trainers
-        ]  # this returns a list which may break things
+        # TODO: Currently only returning one snapshot - need to merge dictionary
+        return self.trainers[0].get_snapshot()
+        # return [
+        #     trainer.get_snapshot() for trainer in self.trainers
+        # ]  # this returns a list which may break things
 

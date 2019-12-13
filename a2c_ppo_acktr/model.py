@@ -55,6 +55,7 @@ class Policy(nn.Module):
         base_kwargs=None,
         dist=None,
         obs_space=None,
+        symbolic_action_size=0,
     ):
         super(Policy, self).__init__()
         if base_kwargs is None:
@@ -77,7 +78,10 @@ class Policy(nn.Module):
 
         self.shape = None
         if isinstance(obs_space, Tuple):
-            self.shape = (obs_space[0].shape, obs_space[1].shape)
+            self.shape = (
+                obs_space[0].shape,
+                obs_space[1].shape[0] + symbolic_action_size,
+            )
 
     @property
     def is_recurrent(self):
@@ -135,7 +139,7 @@ class Policy(nn.Module):
 def _unflatten_tuple(shape, _tensor):
     """Assumes tensor is 2 dimensional. converts (n,c*h*w+x) -> ((n,c, h, w),(n, x))"""
     chw = np.prod(shape[0])
-    x = shape[1][0]
+    x = shape[1]
     flat, fc = torch.split(_tensor, [chw, x], dim=1)
     return flat.view(_tensor.shape[0], *shape[0]), fc
 
@@ -273,7 +277,7 @@ class CNNBase(NNBase):
             x = self.fc(self.main(inputs))
         else:
             cnn, fc = inputs
-            fc_in = self.main(cnn)
+            fc_in = self.main(cnn / 255)
             # print(
             #     f"dense max: {fc.max()} min: {fc.min()} cnn_out max: {fc_in.max()} min: {fc_in.min()}"
             # )
