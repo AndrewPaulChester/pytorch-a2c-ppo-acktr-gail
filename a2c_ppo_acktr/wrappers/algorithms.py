@@ -1,5 +1,5 @@
 import abc
-
+import time
 import gtimer as gt
 
 from a2c_ppo_acktr.wrappers.data_collectors import RolloutStepCollector
@@ -75,6 +75,7 @@ class IkostrikovRLAlgorithm(BaseRLAlgorithm, metaclass=abc.ABCMeta):
                         step, self.num_expl_steps_per_train_loop
                     )
                     gt.stamp("data storing", unique=False)
+                    # time.sleep(0.2)
 
                 rollouts = self.expl_data_collector.get_rollouts()
                 self.training_mode(True)

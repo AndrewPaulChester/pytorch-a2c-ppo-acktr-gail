@@ -373,16 +373,19 @@ class ThreeTierStepCollector(RolloutStepCollector):
         learn_recurrent_hidden_states = torch.zeros((self.num_processes, 1))
         plan_mask = np.zeros((self.num_processes,), dtype=np.bool)
 
+        agent_info_control = []
+
         for i, ((a, e), aic) in enumerate(results):
-            ail = aic["agent_info_learn"]
+            ail = aic.pop("agent_info_learn")
             action[i] = a
             explored[i] = e
             value[i] = aic["value"]
             action_log_prob[i] = aic["probs"]
-            print("buffer", recurrent_hidden_states.shape)
-            print("rnnhxs", aic["rnn_hxs"])
-            print("probs", aic["probs"])
+            # print("buffer", recurrent_hidden_states.shape)
+            # print("rnnhxs", aic["rnn_hxs"])
+            # print("probs", aic["probs"])
             recurrent_hidden_states = aic["rnn_hxs"]
+            agent_info_control.append(aic)
             self.symbolic_actions[i] = aic["symbolic_action"]
             if "subgoal" in ail:
                 plan_mask[i] = 1
@@ -404,6 +407,7 @@ class ThreeTierStepCollector(RolloutStepCollector):
             learn_action_log_prob,
             learn_recurrent_hidden_states,
             plan_mask,
+            agent_info_control,
         )
 
     def collect_one_step(self, step, step_total):
@@ -441,6 +445,7 @@ class ThreeTierStepCollector(RolloutStepCollector):
             learn_action_log_prob,
             learn_recurrent_hidden_states,
             plan_mask,
+            agent_info_control,
         ) = self.parallelise_results(results)
 
         # value = agent_info_control["value"]
@@ -476,8 +481,8 @@ class ThreeTierStepCollector(RolloutStepCollector):
         step_timeout, step_complete, plan_ended = self._policy.check_action_status(
             self.obs.squeeze(1)
         )
-        print("plan ended", plan_ended)
-        print("reward shape", self.cumulative_reward.shape)
+        # print("plan ended", plan_ended)
+        # print("reward shape", self.cumulative_reward.shape)
 
         internal_reward = reward + np.array(step_complete) * 10
         external_reward = reward - np.array(step_timeout) * 10
@@ -491,6 +496,7 @@ class ThreeTierStepCollector(RolloutStepCollector):
         bad_masks = torch.FloatTensor(
             [[0.0] if "bad_transition" in info.keys() else [1.0] for info in infos]
         )
+        self._policy.reset_selected(done)
 
         gt.stamp("exploration sampling", unique=False)
 
@@ -521,7 +527,9 @@ class ThreeTierStepCollector(RolloutStepCollector):
         gt.stamp("data storing", unique=False)
         # flat_ai = ppp.dict_of_list__to__list_of_dicts(agent_info_control, len(action))
 
-        # self.add_step(action, action_log_prob, external_reward, done, value, flat_ai)
+        self.add_step(
+            action, action_log_prob, internal_reward, done, value, agent_info_control
+        )
 
         # reset plans
         self.cumulative_reward[plan_ended] = 0
@@ -529,4 +537,9 @@ class ThreeTierStepCollector(RolloutStepCollector):
         self.plan_length[plan_ended] = 0
 
     def get_snapshot(self):
-        return dict(env=self._env, policy=self._policy.learner)
+        return dict(
+            env=self._env,
+            controller=self._policy.controller.policy,
+            learner=self._policy.learner,
+        )
+

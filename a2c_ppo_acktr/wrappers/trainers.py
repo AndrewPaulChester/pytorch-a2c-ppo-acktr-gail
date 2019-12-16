@@ -221,7 +221,14 @@ class MultiTrainer:
 
     def get_snapshot(self):
         # TODO: Currently only returning one snapshot - need to merge dictionary
-        return self.trainers[0].get_snapshot()
+        snapshot = {}
+        for k, v in self.trainers[0].get_snapshot().items():
+            snapshot["controller/" + k] = v
+
+        for k, v in self.trainers[1].get_snapshot().items():
+            snapshot["learner/" + k] = v
+
+        return snapshot
         # return [
         #     trainer.get_snapshot() for trainer in self.trainers
         # ]  # this returns a list which may break things
