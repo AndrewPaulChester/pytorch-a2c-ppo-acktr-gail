@@ -1,4 +1,5 @@
 import numpy as np
+from collections import defaultdict
 
 from gym.spaces import Tuple, Box
 import torch
@@ -9,9 +10,11 @@ from a2c_ppo_acktr.storage import RolloutStorage, AsyncRollouts
 from rlkit.core.external_log import LogPathCollector
 import rlkit.torch.pytorch_util as ptu
 from rlkit.util.multi_queue import MultiQueue
+from rlkit.core.eval_util import create_stats_ordered_dict
 import rlkit.pythonplusplus as ppp
 
 from gym_taxi.utils.spaces import Json
+from gym_craft.envs.craft_env import ACTIONS
 
 
 def _flatten_tuple(observation):
@@ -332,6 +335,7 @@ class ThreeTierStepCollector(RolloutStepCollector):
         self.cumulative_reward = np.zeros(num_processes)
         self.discounts = np.ones(num_processes)
         self.plan_length = np.zeros(num_processes)
+        self.step_length = np.zeros(num_processes)
         self.gamma = gamma
         self.no_plan_penalty = no_plan_penalty
 
@@ -355,6 +359,14 @@ class ThreeTierStepCollector(RolloutStepCollector):
         n, p, l = self._rollouts.obs.shape
         self._rollouts.obs = torch.zeros(n, p, l + symbolic_action_size).to(self.device)
         self.symbolic_actions = torch.zeros(p, symbolic_action_size).to(self.device)
+        # logging
+
+        self.epoch_stats = {
+            "plan": defaultdict(self.init_goal),
+            "step": defaultdict(self.init_goal),
+            "action": defaultdict(lambda: defaultdict(int)),
+        }
+        self.plans = [None] * num_processes
 
     def get_rollouts(self):
         return self._rollouts, self._learn_rollouts
@@ -484,11 +496,23 @@ class ThreeTierStepCollector(RolloutStepCollector):
         # print("plan ended", plan_ended)
         # print("reward shape", self.cumulative_reward.shape)
 
-        internal_reward = reward + np.array(step_complete) * 10
-        external_reward = reward - np.array(step_timeout) * 10
+        self.log_step(
+            action,
+            goal,
+            agent_info_control,
+            reward,
+            done,
+            step_complete,
+            step_timeout,
+            plan_ended,
+        )
+
+        internal_reward = reward + np.array(step_complete) * 2
+        external_reward = reward - np.array(step_timeout) * 2
 
         self.discounts *= self.gamma
         self.plan_length += 1
+        self.step_length += 1
         self.cumulative_reward += external_reward * self.discounts
 
         # If done then clean the history of observations.
@@ -512,14 +536,14 @@ class ThreeTierStepCollector(RolloutStepCollector):
             masks,
             bad_masks,
         )
-
-        if np.any(plan_ended):
+        observation_needed = np.logical_or(plan_ended, done)
+        if np.any(observation_needed):
             self._learn_rollouts.observation_insert(
                 stored_obs,
                 torch.from_numpy(self.cumulative_reward).unsqueeze(dim=1).float(),
                 masks,
                 bad_masks,
-                plan_ended,
+                observation_needed,
                 plan_length=torch.from_numpy(self.plan_length).unsqueeze(dim=1).float(),
             )
 
@@ -532,9 +556,58 @@ class ThreeTierStepCollector(RolloutStepCollector):
         )
 
         # reset plans
-        self.cumulative_reward[plan_ended] = 0
-        self.discounts[plan_ended] = 1
-        self.plan_length[plan_ended] = 0
+        self.cumulative_reward[observation_needed] = 0
+        self.discounts[observation_needed] = 1
+        self.plan_length[observation_needed] = 0
+        self.step_length[observation_needed] = 0
+        self.step_length[np.logical_or(step_complete, step_timeout)] = 0
+
+    def log_step(
+        self,
+        act,
+        goal,
+        agent_info_control,
+        reward,
+        done,
+        step_complete,
+        step_timeout,
+        plan_ended,
+    ):
+
+        # clean representations
+        for i in range(self.num_processes):
+
+            plan = self.clean_goal(goal[i])
+            if plan is not None:
+                self.plans[i] = plan
+            else:
+                plan = self.plans[i]
+
+            step = self.clean_step(
+                agent_info_control[i]["symbolic_action"][0]
+            )  # or should the zero be i
+            action = self.clean_action(act[i])
+
+            # log plan stats
+            if plan is not None:
+                self.epoch_stats["plan"][plan]["reward"] += reward[i]
+                if plan_ended[i] or done[i]:
+                    self.epoch_stats["plan"][plan]["count"] += 1
+                    self.epoch_stats["plan"][plan]["length"].append(self.plan_length[i])
+                    if step_complete[i]:
+                        self.epoch_stats["plan"][plan]["success"] += 1
+
+            # log step stats
+            if step is not None:
+                self.epoch_stats["step"][step]["reward"] += reward[i]
+                if step_complete[i] or step_timeout[i] or plan_ended[i] or done[i]:
+                    self.epoch_stats["step"][step]["count"] += 1
+                    self.epoch_stats["step"][step]["length"].append(self.step_length[i])
+                    if step_complete[i]:
+                        self.epoch_stats["step"][step]["success"] += 1
+
+                # log action stats
+                self.epoch_stats["action"][step][action] += 1
 
     def get_snapshot(self):
         return dict(
@@ -542,4 +615,83 @@ class ThreeTierStepCollector(RolloutStepCollector):
             controller=self._policy.controller.policy,
             learner=self._policy.learner,
         )
+
+    def get_diagnostics(self):
+        stats = super().get_diagnostics()
+
+        for plan, values in self.epoch_stats["plan"].items():
+            stats[f"plan/{plan}/count"] = values["count"]
+            stats[f"plan/{plan}/success"] = (
+                0 if values["count"] == 0 else values["success"] / values["count"]
+            )
+            stats[f"plan/{plan}/reward"] = (
+                0 if values["count"] == 0 else values["reward"] / values["count"]
+            )
+            stats.update(
+                create_stats_ordered_dict(f"plan/{plan}/length", values["length"])
+            )
+
+        for step, values in self.epoch_stats["step"].items():
+            stats[f"step/{step}/count"] = values["count"]
+            stats[f"step/{step}/success"] = (
+                0 if values["count"] == 0 else values["success"] / values["count"]
+            )
+            stats[f"step/{step}/reward"] = (
+                0 if values["count"] == 0 else values["reward"] / values["count"]
+            )
+            stats.update(
+                create_stats_ordered_dict(f"step/{step}/length", values["length"])
+            )
+            total = sum([c for c in self.epoch_stats["action"][step].values()])
+            for action, count in self.epoch_stats["action"][step].items():
+                stats[f"action/{step}/{action}/percentage"] = (
+                    0 if total == 0 else count / total
+                )
+
+        return stats
+
+    def init_goal(self):
+        return {"count": 0, "success": 0, "reward": 0, "length": []}
+
+    def end_epoch(self, epoch):
+
+        self.epoch_stats = {
+            "plan": defaultdict(self.init_goal),
+            "step": defaultdict(self.init_goal),
+            "action": defaultdict(lambda: defaultdict(int)),
+        }
+        super().end_epoch(epoch)
+
+    def clean_goal(self, goal):
+        action = self._policy.env.convert_to_action(goal, None)
+
+        if action["have"] is not None and action["move"] is not None:
+            return "mixed"
+        if action["have"] is not None:
+            item, quantity = action["have"]
+            return "have" + item
+        if action["move"] is not None:
+            return f"move {action['move'].name}"
+        return None
+
+    def clean_step(self, step):
+        if step.sum().item() == 0:
+            return None
+        names = [
+            "move",
+            "clear",
+            "face tree",
+            "face rock",
+            "mine tree",
+            "mine rock",
+            "craft plank",
+            "craft stick",
+            "craft wooden pickaxe",
+            "craft stone pickaxe",
+        ]
+        index = step[2:].argmax().item()
+        return names[index]
+
+    def clean_action(self, action):
+        return ACTIONS(action.item() + 1).name
 

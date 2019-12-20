@@ -359,6 +359,10 @@ class AsyncRollouts(RolloutStorage):
         value_preds,
         step_masks,
     ):
+
+        # print("action insert")
+        # print(f"action_ready {self.action_ready}")
+        # print(f"step_masks {step_masks}")
         if min(self.action_ready[step_masks]) == 0:
             raise ValueError("inserting actions when observations expected")
 
@@ -378,6 +382,9 @@ class AsyncRollouts(RolloutStorage):
     def observation_insert(
         self, obs, rewards, masks, bad_masks, step_masks, plan_length=None
     ):
+        # print("observation insert")
+        # print(f"action_ready {self.action_ready}")
+        # print(f"step_masks {step_masks}")
         if max(self.action_ready[step_masks]) == 1:
             raise ValueError("inserting observations when actions expected")
         # print(step_masks)
