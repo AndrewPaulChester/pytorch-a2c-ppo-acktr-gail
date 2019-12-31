@@ -366,16 +366,22 @@ class AsyncRollouts(RolloutStorage):
         if min(self.action_ready[step_masks]) == 0:
             raise ValueError("inserting actions when observations expected")
 
-        self.recurrent_hidden_states[self.step[step_masks] + 1, step_masks].copy_(
+        self.recurrent_hidden_states[
+            self.step[step_masks] + 1, step_masks
+        ] = self.recurrent_hidden_states[self.step[step_masks] + 1, step_masks].copy_(
             recurrent_hidden_states
         )
-        self.actions[self.step[step_masks], step_masks].copy_(actions[step_masks])
-        self.action_log_probs[self.step[step_masks], step_masks].copy_(
+        self.actions[self.step[step_masks], step_masks] = self.actions[
+            self.step[step_masks], step_masks
+        ].copy_(actions[step_masks])
+        self.action_log_probs[
+            self.step[step_masks], step_masks
+        ] = self.action_log_probs[self.step[step_masks], step_masks].copy_(
             action_log_probs[step_masks]
         )
-        self.value_preds[self.step[step_masks], step_masks].copy_(
-            value_preds[step_masks]
-        )
+        self.value_preds[self.step[step_masks], step_masks] = self.value_preds[
+            self.step[step_masks], step_masks
+        ].copy_(value_preds[step_masks])
 
         self.action_ready[step_masks] = 0
 
@@ -395,16 +401,22 @@ class AsyncRollouts(RolloutStorage):
         # print(self.obs[self.step[step_masks] + 1, step_masks].shape)
         # print(obs[step_masks].shape)
 
-        self.obs[self.step[step_masks] + 1, step_masks].copy_(obs[step_masks])
-        self.rewards[self.step[step_masks], step_masks].copy_(rewards[step_masks])
-        self.masks[self.step[step_masks] + 1, step_masks].copy_(masks[step_masks])
-        self.bad_masks[self.step[step_masks] + 1, step_masks].copy_(
-            bad_masks[step_masks]
-        )
+        self.obs[self.step[step_masks] + 1, step_masks] = self.obs[
+            self.step[step_masks] + 1, step_masks
+        ].copy_(obs[step_masks])
+        self.rewards[self.step[step_masks], step_masks] = self.rewards[
+            self.step[step_masks], step_masks
+        ].copy_(rewards[step_masks])
+        self.masks[self.step[step_masks] + 1, step_masks] = self.masks[
+            self.step[step_masks] + 1, step_masks
+        ].copy_(masks[step_masks])
+        self.bad_masks[self.step[step_masks] + 1, step_masks] = self.bad_masks[
+            self.step[step_masks] + 1, step_masks
+        ].copy_(bad_masks[step_masks])
         if plan_length is not None:
-            self.plan_length[self.step[step_masks], step_masks].copy_(
-                plan_length[step_masks]
-            )
+            self.plan_length[self.step[step_masks], step_masks] = self.plan_length[
+                self.step[step_masks], step_masks
+            ].copy_(plan_length[step_masks])
 
         self.step[step_masks] = (self.step[step_masks] + 1) % self.num_steps
         self.action_ready[step_masks] = 1
