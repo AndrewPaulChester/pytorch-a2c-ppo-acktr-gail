@@ -110,6 +110,7 @@ class Policy(nn.Module):
         action_log_probs = dist.log_probs(action)
         dist_entropy = dist.entropy().mean()
         probs = dist.get_probs()
+        # print(list(probs[0].cpu()))
         # print(action)
         return value, action, action_log_probs, rnn_hxs, probs
 
@@ -229,7 +230,13 @@ class NNBase(nn.Module):
 
 class CNNBase(NNBase):
     def __init__(
-        self, num_inputs, recurrent=False, hidden_size=512, fc_size=0, deep=False
+        self,
+        num_inputs,
+        recurrent=False,
+        hidden_size=512,
+        fc_size=0,
+        deep=False,
+        conv=None,
     ):
         """ num inputs is the number of channels """
         super(CNNBase, self).__init__(recurrent, hidden_size, hidden_size)
@@ -240,16 +247,18 @@ class CNNBase(NNBase):
             lambda x: nn.init.constant_(x, 0),
             nn.init.calculate_gain("relu"),
         )
-
-        self.main = nn.Sequential(
-            init_(nn.Conv2d(num_inputs, 32, 8, stride=4)),
-            nn.ReLU(),
-            init_(nn.Conv2d(32, 64, 4, stride=2)),
-            nn.ReLU(),
-            init_(nn.Conv2d(64, 32, 3, stride=1)),
-            nn.ReLU(),
-            Flatten(),
-        )
+        if conv:
+            self.main = conv
+        else:
+            self.main = nn.Sequential(
+                init_(nn.Conv2d(num_inputs, 32, 8, stride=4)),
+                nn.ReLU(),
+                init_(nn.Conv2d(32, 64, 4, stride=2)),
+                nn.ReLU(),
+                init_(nn.Conv2d(64, 32, 3, stride=1)),
+                nn.ReLU(),
+                Flatten(),
+            )
 
         if deep:
             self.fc = nn.Sequential(

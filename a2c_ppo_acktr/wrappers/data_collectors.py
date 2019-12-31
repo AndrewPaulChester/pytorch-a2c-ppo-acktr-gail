@@ -131,7 +131,6 @@ class RolloutStepCollector(LogPathCollector):
         bad_masks = torch.FloatTensor(
             [[0.0] if "bad_transition" in info.keys() else [1.0] for info in infos]
         )
-        gt.stamp("exploration sampling", unique=False)
 
         self._rollouts.insert(
             stored_obs,
@@ -143,9 +142,9 @@ class RolloutStepCollector(LogPathCollector):
             masks,
             bad_masks,
         )
-        gt.stamp("data storing", unique=False)
+
         flat_ai = ppp.dict_of_list__to__list_of_dicts(agent_info, len(action))
-        gt.stamp("flattening", unique=False)
+
         # print(flat_ai)
         self.add_step(action, action_log_prob, reward, done, value, flat_ai)
 
@@ -286,7 +285,6 @@ class HierarchicalStepCollector(RolloutStepCollector):
         bad_masks = torch.FloatTensor(
             [[0.0] if "bad_transition" in info.keys() else [1.0] for info in infos]
         )
-        gt.stamp("exploration sampling", unique=False)
 
         self._rollouts.insert(
             stored_obs,
@@ -319,6 +317,7 @@ class ThreeTierStepCollector(RolloutStepCollector):
         num_processes=1,
         gamma=1,
         no_plan_penalty=False,
+        meta_num_epoch_paths=None,
     ):
 
         super().__init__(
@@ -340,7 +339,7 @@ class ThreeTierStepCollector(RolloutStepCollector):
         self.no_plan_penalty = no_plan_penalty
 
         self._learn_rollouts = AsyncRollouts(
-            max_num_epoch_paths_saved,
+            meta_num_epoch_paths,
             num_processes,
             self.shape,
             Box(-np.inf, np.inf, (ancillary_goal_size,)),
@@ -507,13 +506,15 @@ class ThreeTierStepCollector(RolloutStepCollector):
             plan_ended,
         )
 
-        internal_reward = reward + np.array(step_complete) * 2
-        external_reward = reward - np.array(step_timeout) * 2
+        internal_reward = reward + np.array(step_complete) * 1
 
         self.discounts *= self.gamma
         self.plan_length += 1
         self.step_length += 1
-        self.cumulative_reward += external_reward * self.discounts
+        # TODO: Revisit penalty for timed out plans
+        self.cumulative_reward += (
+            reward * self.discounts
+        )  # - np.array(step_timeout) * 1
 
         # If done then clean the history of observations.
         masks = torch.FloatTensor([[0.0] if done_ else [1.0] for done_ in done])
@@ -522,9 +523,8 @@ class ThreeTierStepCollector(RolloutStepCollector):
         )
         self._policy.reset_selected(done)
 
-        gt.stamp("exploration sampling", unique=False)
-
         internal_reward = torch.from_numpy(internal_reward).unsqueeze(dim=1).float()
+        environment_reward = torch.from_numpy(reward).unsqueeze(dim=1).float()
 
         self._rollouts.insert(
             augmented_obs,
@@ -548,11 +548,11 @@ class ThreeTierStepCollector(RolloutStepCollector):
             )
 
         # TODO: this is doing logging of stats for tb.... will figure it out later
-        gt.stamp("data storing", unique=False)
+
         # flat_ai = ppp.dict_of_list__to__list_of_dicts(agent_info_control, len(action))
 
         self.add_step(
-            action, action_log_prob, internal_reward, done, value, agent_info_control
+            action, action_log_prob, environment_reward, done, value, agent_info_control
         )
 
         # reset plans
@@ -672,7 +672,7 @@ class ThreeTierStepCollector(RolloutStepCollector):
             return "have" + item
         if action["move"] is not None:
             return f"move {action['move'].name}"
-        return None
+        return "noop"
 
     def clean_step(self, step):
         if step.sum().item() == 0:

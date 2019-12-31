@@ -157,5 +157,7 @@ class DistributionTuple:
         return sum([d.entropy() for d in self.distributions])
 
     def get_probs(self):
-        return torch.cat([d.get_probs() for d in self.distributions], dim=1)
+        probs = torch.cat([d.get_probs() for d in self.distributions], dim=1)
+        print(probs)
+        return probs
 
