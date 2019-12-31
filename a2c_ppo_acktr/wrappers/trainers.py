@@ -171,6 +171,7 @@ class PPOTrainer(PPO, TorchTrainer):
             self.eval_statistics["Distribution Entropy"] = dist_entropy
 
     def get_diagnostics(self):
+        self.eval_statistics["num_train_steps"] = self._num_train_steps
         return self.eval_statistics
 
     def end_epoch(self, epoch):
@@ -203,10 +204,16 @@ class MultiTrainer:
 
     def get_diagnostics(self):
         # TODO: Currently only returning one diagnostic - need to merge dictionary
-        return self.trainers[0].eval_statistics
-        # return [
-        #     trainer.eval_statistics for trainer in self.trainers
-        # ]  # this returns a list which may break things
+        diagnostics = {}
+        for k, v in self.trainers[0].get_diagnostics().items():
+            diagnostics["controller/" + k] = v
+
+        for k, v in self.trainers[1].get_diagnostics().items():
+            diagnostics["learner/" + k] = v
+
+        return diagnostics
+
+        # return self.trainers[0].eval_statistics
 
     def end_epoch(self, epoch):
         for trainer in self.trainers:

@@ -74,10 +74,12 @@ class IkostrikovRLAlgorithm(BaseRLAlgorithm, metaclass=abc.ABCMeta):
                     self.expl_data_collector.collect_one_step(
                         step, self.num_expl_steps_per_train_loop
                     )
-                    gt.stamp("data storing", unique=False)
-                    # time.sleep(0.4)
+                    # time.sleep(1)
+
+                gt.stamp("exploration sampling", unique=False)
 
                 rollouts = self.expl_data_collector.get_rollouts()
+                gt.stamp("data storing", unique=False)
                 self.training_mode(True)
                 self.trainer.train(rollouts)
                 gt.stamp("training", unique=False)
