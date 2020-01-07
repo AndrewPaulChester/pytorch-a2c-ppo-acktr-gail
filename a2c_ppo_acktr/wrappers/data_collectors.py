@@ -506,7 +506,7 @@ class ThreeTierStepCollector(RolloutStepCollector):
             plan_ended,
         )
 
-        internal_reward = reward + np.array(step_complete) * 1
+        internal_reward = (reward / 10) + np.array(step_complete) * 1
 
         self.discounts *= self.gamma
         self.plan_length += 1
@@ -672,7 +672,7 @@ class ThreeTierStepCollector(RolloutStepCollector):
             return "have" + item
         if action["move"] is not None:
             return f"move {action['move'].name}"
-        return "noop"
+        return None  # "noop"
 
     def clean_step(self, step):
         if step.sum().item() == 0:
