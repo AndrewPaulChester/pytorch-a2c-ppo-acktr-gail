@@ -671,7 +671,7 @@ class ThreeTierStepCollector(RolloutStepCollector):
             item, quantity = action["have"]
             return "have" + item
         if action["move"] is not None:
-            return f"move {action['move'].name}"
+            return f"move ({action['move'][0]},{action['move'][1]})"
         return None  # "noop"
 
     def clean_step(self, step):

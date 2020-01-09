@@ -158,6 +158,6 @@ class DistributionTuple:
 
     def get_probs(self):
         probs = torch.cat([d.get_probs() for d in self.distributions], dim=1)
-        print(probs)
+        # print(probs)
         return probs
 
