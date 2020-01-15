@@ -55,6 +55,7 @@ class Policy(nn.Module):
         base_kwargs=None,
         dist=None,
         obs_space=None,
+        symbolic_action_size=0,
     ):
         super(Policy, self).__init__()
         if base_kwargs is None:
@@ -77,7 +78,10 @@ class Policy(nn.Module):
 
         self.shape = None
         if isinstance(obs_space, Tuple):
-            self.shape = (obs_space[0].shape, obs_space[1].shape)
+            self.shape = (
+                obs_space[0].shape,
+                obs_space[1].shape[0] + symbolic_action_size,
+            )
 
     @property
     def is_recurrent(self):
@@ -106,6 +110,7 @@ class Policy(nn.Module):
         action_log_probs = dist.log_probs(action)
         dist_entropy = dist.entropy().mean()
         probs = dist.get_probs()
+        # print(list(probs[0].cpu()))
         # print(action)
         return value, action, action_log_probs, rnn_hxs, probs
 
@@ -135,7 +140,7 @@ class Policy(nn.Module):
 def _unflatten_tuple(shape, _tensor):
     """Assumes tensor is 2 dimensional. converts (n,c*h*w+x) -> ((n,c, h, w),(n, x))"""
     chw = np.prod(shape[0])
-    x = shape[1][0]
+    x = shape[1]
     flat, fc = torch.split(_tensor, [chw, x], dim=1)
     return flat.view(_tensor.shape[0], *shape[0]), fc
 
@@ -225,7 +230,13 @@ class NNBase(nn.Module):
 
 class CNNBase(NNBase):
     def __init__(
-        self, num_inputs, recurrent=False, hidden_size=512, fc_size=0, deep=False
+        self,
+        num_inputs,
+        recurrent=False,
+        hidden_size=512,
+        fc_size=0,
+        deep=False,
+        conv=None,
     ):
         """ num inputs is the number of channels """
         super(CNNBase, self).__init__(recurrent, hidden_size, hidden_size)
@@ -236,16 +247,18 @@ class CNNBase(NNBase):
             lambda x: nn.init.constant_(x, 0),
             nn.init.calculate_gain("relu"),
         )
-
-        self.main = nn.Sequential(
-            init_(nn.Conv2d(num_inputs, 32, 8, stride=4)),
-            nn.ReLU(),
-            init_(nn.Conv2d(32, 64, 4, stride=2)),
-            nn.ReLU(),
-            init_(nn.Conv2d(64, 32, 3, stride=1)),
-            nn.ReLU(),
-            Flatten(),
-        )
+        if conv:
+            self.main = conv
+        else:
+            self.main = nn.Sequential(
+                init_(nn.Conv2d(num_inputs, 32, 8, stride=4)),
+                nn.ReLU(),
+                init_(nn.Conv2d(32, 64, 4, stride=2)),
+                nn.ReLU(),
+                init_(nn.Conv2d(64, 32, 3, stride=1)),
+                nn.ReLU(),
+                Flatten(),
+            )
 
         if deep:
             self.fc = nn.Sequential(
@@ -273,7 +286,7 @@ class CNNBase(NNBase):
             x = self.fc(self.main(inputs))
         else:
             cnn, fc = inputs
-            fc_in = self.main(cnn)
+            fc_in = self.main(cnn / 255)
             # print(
             #     f"dense max: {fc.max()} min: {fc.min()} cnn_out max: {fc_in.max()} min: {fc_in.min()}"
             # )

@@ -37,6 +37,7 @@ class RolloutStorage(object):
         else:
             action_shape = action_space.shape[0]
         self.actions = torch.zeros(num_steps, num_processes, action_shape)
+        # Why is this here? seems to cause problems with cross entropy
         if action_space.__class__.__name__ == "Discrete":
             self.actions = self.actions.long()
         self.masks = torch.ones(num_steps + 1, num_processes, 1)
@@ -49,6 +50,10 @@ class RolloutStorage(object):
 
         self.num_steps = num_steps
         self.step = 0
+
+    @property
+    def max_step(self):
+        return self.step
 
     def to(self, device):
         """Sends all components of RolloutStorage to specified device"""
@@ -167,12 +172,13 @@ class RolloutStorage(object):
                     )
 
     def feed_forward_generator(
-        self, advantages, num_mini_batch=None, mini_batch_size=None
+        self, advantages, num_mini_batch=None, mini_batch_size=None, valid_indices=None
     ):
         """only used for PPO to get random minibatches of current epoch"""
         num_steps, num_processes = self.rewards.size()[0:2]
-        batch_size = num_processes * num_steps
-
+        if valid_indices is None:
+            valid_indices = range(num_processes * num_steps)
+        batch_size = len(valid_indices)
         if mini_batch_size is None:
             assert batch_size >= num_mini_batch, (
                 "PPO requires the number of processes ({}) "
@@ -184,7 +190,7 @@ class RolloutStorage(object):
             )
             mini_batch_size = batch_size // num_mini_batch
         sampler = BatchSampler(
-            SubsetRandomSampler(range(batch_size)), mini_batch_size, drop_last=True
+            SubsetRandomSampler(valid_indices), mini_batch_size, drop_last=True
         )
         for indices in sampler:
             obs_batch = self.obs[:-1].view(-1, *self.obs.size()[2:])[indices]
@@ -264,3 +270,192 @@ class RolloutStorage(object):
 
             yield obs_batch, recurrent_hidden_states_batch, actions_batch, value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, adv_targ
 
+
+class OptionRollouts(RolloutStorage):
+    # TODO: finish this class - consider if it can be merged with standard rollout storage
+    # not required if we use uvfa
+    def __init__(
+        self,
+        num_steps,
+        num_processes,
+        obs_shape,
+        action_space,
+        recurrent_hidden_state_size,
+    ):
+        super().__init__(
+            num_steps,
+            num_processes,
+            obs_shape,
+            action_space,
+            recurrent_hidden_state_size,
+        )
+
+        self.options = torch.zeros(num_steps, num_processes, 1)
+
+    def to(self, device):
+        """Sends all components of RolloutStorage to specified device"""
+        super().to(device)
+        self.options = self.options.to(device)
+
+    def insert(
+        self,
+        obs,
+        recurrent_hidden_states,
+        actions,
+        action_log_probs,
+        value_preds,
+        rewards,
+        masks,
+        bad_masks,
+        option,
+        plan_length=None,
+    ):
+        """Inserts a new transition into the experience buffer"""
+        super().insert(
+            obs,
+            recurrent_hidden_states,
+            actions,
+            action_log_probs,
+            value_preds,
+            rewards,
+            masks,
+            bad_masks,
+            plan_length,
+        )
+        self.options[self.step + 1].copy_(option)
+
+
+class AsyncRollouts(RolloutStorage):
+    # TODO: finish this class - consider if it can be merged with standard rollout storage
+    # need to implement modified compute_returns and feed_forward generator, and to consider
+    # if after_update needs to zero out the buffers (or at least the step pointers)
+    def __init__(
+        self,
+        num_steps,
+        num_processes,
+        obs_shape,
+        action_space,
+        recurrent_hidden_state_size,
+    ):
+        super().__init__(
+            num_steps,
+            num_processes,
+            obs_shape,
+            action_space,
+            recurrent_hidden_state_size,
+        )
+        self.step = np.zeros(num_processes, dtype=np.int)
+        self.action_ready = np.ones(num_processes)
+
+    @property
+    def max_step(self):
+        return max(self.step)
+
+    def action_insert(
+        self,
+        recurrent_hidden_states,
+        actions,
+        action_log_probs,
+        value_preds,
+        step_masks,
+    ):
+
+        # print("action insert")
+        # print(f"action_ready {self.action_ready}")
+        # print(f"step_masks {step_masks}")
+        if min(self.action_ready[step_masks]) == 0:
+            raise ValueError("inserting actions when observations expected")
+
+        self.recurrent_hidden_states[
+            self.step[step_masks] + 1, step_masks
+        ] = self.recurrent_hidden_states[self.step[step_masks] + 1, step_masks].copy_(
+            recurrent_hidden_states
+        )
+        self.actions[self.step[step_masks], step_masks] = self.actions[
+            self.step[step_masks], step_masks
+        ].copy_(actions[step_masks])
+        self.action_log_probs[
+            self.step[step_masks], step_masks
+        ] = self.action_log_probs[self.step[step_masks], step_masks].copy_(
+            action_log_probs[step_masks]
+        )
+        self.value_preds[self.step[step_masks], step_masks] = self.value_preds[
+            self.step[step_masks], step_masks
+        ].copy_(value_preds[step_masks])
+
+        self.action_ready[step_masks] = 0
+
+    def observation_insert(
+        self, obs, rewards, masks, bad_masks, step_masks, plan_length=None
+    ):
+        # print("observation insert")
+        # print(f"action_ready {self.action_ready}")
+        # print(f"step_masks {step_masks}")
+        if max(self.action_ready[step_masks]) == 1:
+            raise ValueError("inserting observations when actions expected")
+        # print(step_masks)
+        # print(self.step)
+        # print(self.obs.shape)
+        # print(obs.shape)
+        # print(self.step[step_masks] + 1)
+        # print(self.obs[self.step[step_masks] + 1, step_masks].shape)
+        # print(obs[step_masks].shape)
+
+        self.obs[self.step[step_masks] + 1, step_masks] = self.obs[
+            self.step[step_masks] + 1, step_masks
+        ].copy_(obs[step_masks])
+        self.rewards[self.step[step_masks], step_masks] = self.rewards[
+            self.step[step_masks], step_masks
+        ].copy_(rewards[step_masks])
+        self.masks[self.step[step_masks] + 1, step_masks] = self.masks[
+            self.step[step_masks] + 1, step_masks
+        ].copy_(masks[step_masks])
+        self.bad_masks[self.step[step_masks] + 1, step_masks] = self.bad_masks[
+            self.step[step_masks] + 1, step_masks
+        ].copy_(bad_masks[step_masks])
+        if plan_length is not None:
+            self.plan_length[self.step[step_masks], step_masks] = self.plan_length[
+                self.step[step_masks], step_masks
+            ].copy_(plan_length[step_masks])
+
+        self.step[step_masks] = (self.step[step_masks] + 1) % self.num_steps
+        self.action_ready[step_masks] = 1
+
+    def insert(
+        self,
+        obs,
+        recurrent_hidden_states,
+        actions,
+        action_log_probs,
+        value_preds,
+        rewards,
+        masks,
+        bad_masks,
+        step_masks,
+        plan_length=None,
+    ):
+        self.action_insert(
+            recurrent_hidden_states, actions, action_log_probs, value_preds, step_masks
+        )
+        self.observation_insert(obs, rewards, masks, bad_masks, step_masks, plan_length)
+
+    def feed_forward_generator(
+        self, advantages, num_mini_batch=None, mini_batch_size=None, valid_indices=None
+    ):
+        valid_indices = []
+        offset = 0
+        for step in self.step:
+            valid_indices.extend(range(offset, offset + step))
+            offset += self.num_steps
+        return super().feed_forward_generator(
+            advantages, num_mini_batch, mini_batch_size, valid_indices=valid_indices
+        )
+
+    def after_update(self):
+        """Zeros out masks to ensure that"""
+        self.obs[0].copy_(self.obs[-1])
+        self.recurrent_hidden_states[0].copy_(self.recurrent_hidden_states[-1])
+        self.bad_masks[0].copy_(self.bad_masks[-1])
+        masks = self.masks[-1]
+        self.masks = torch.zeros_like(self.masks)
+        self.masks[0].copy_(masks)
