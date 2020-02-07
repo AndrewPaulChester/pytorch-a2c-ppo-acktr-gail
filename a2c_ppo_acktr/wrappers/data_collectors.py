@@ -677,6 +677,24 @@ class ThreeTierStepCollector(RolloutStepCollector):
     def clean_step(self, step):
         if step.sum().item() == 0:
             return None
+        if step.shape == torch.Size([]):
+            names = [
+                None,
+                "face tree",
+                "face rock",
+                "move",
+                "move",
+                "move",
+                "move",
+                "mine tree",
+                "mine rock",
+                "craft plank",
+                "craft stick",
+                "craft wooden_pickaxe",
+                "craft stone_pickaxe",
+                "collect",
+            ]
+            return names[int(step.item())]
         names = [
             "move",
             "clear",
