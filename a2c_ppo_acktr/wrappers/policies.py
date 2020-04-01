@@ -128,7 +128,10 @@ class MultiPolicy(WrappedPolicy):
             else:
                 self.action[i] = dist.sample()
 
-            self.action_log_probs[i] = dist.log_probs(self.action)
+            # print(i)
+            # print(self.action_log_probs.shape)
+            # print(self.action.shape)
+            self.action_log_probs[i] = dist.log_probs(self.action[i])
             self.probs[i] = dist.get_probs()
 
         # print(action)
@@ -162,4 +165,4 @@ class MultiPolicy(WrappedPolicy):
             action_log_probs[i] = dist.log_probs(action[i])
             dist_entropy[i] = dist.entropy().mean()
 
-        return value, action_log_probs, dist_entropy, rnn_hxs
+        return value, action_log_probs, dist_entropy.mean(), rnn_hxs
