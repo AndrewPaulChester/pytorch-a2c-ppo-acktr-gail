@@ -672,6 +672,8 @@ class ThreeTierStepCollector(RolloutStepCollector):
             return "have" + item
         if action["move"] is not None:
             return f"move ({action['move'][0]},{action['move'][1]})"
+        if action["collect"] is not None:
+            return f"collect coins"
         return None  # "noop"
 
     def clean_step(self, step):
@@ -697,7 +699,7 @@ class ThreeTierStepCollector(RolloutStepCollector):
             return names[int(step.item())]
         names = [
             "move",
-            "clear",
+            "collect",
             "face tree",
             "face rock",
             "mine tree",
@@ -712,4 +714,3 @@ class ThreeTierStepCollector(RolloutStepCollector):
 
     def clean_action(self, action):
         return ACTIONS(action.item() + 1).name
-

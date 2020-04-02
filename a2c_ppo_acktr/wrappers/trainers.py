@@ -199,7 +199,6 @@ class MultiTrainer:
                 if batch.max_step == batch.num_steps - 1:
                     trainer.train(batch)
             else:
-                # TODO: this needs to be expanded so the higher level only trains on full batches
                 trainer.train(batch)
 
     def get_diagnostics(self):
