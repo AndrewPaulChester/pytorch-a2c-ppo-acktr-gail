@@ -102,14 +102,19 @@ class MultiPolicy(WrappedPolicy):
                 for i in range(num_options)
             ]
         )
-        self.action = torch.zeros(num_processes).to(device)
-        self.action_log_probs = torch.zeros(num_processes).to(device)
+        self.dists.to(device)
+        self.critics.to(device)
+        self.action = torch.zeros(num_processes, 1).to(device)
+        self.action_log_probs = torch.zeros(num_processes, 1).to(device)
         self.probs = torch.zeros(num_processes, action_space.n).to(device)
 
     def act(self, inputs, rnn_hxs, masks, deterministic=False):
-        """Expects first number in the inputs to be the option index"""
-        options = inputs[0]
-        inputs = inputs[1]
+        """Expects last number in the fc to be the option index"""
+        conv = inputs[0]
+        fc = inputs[1]
+        options = fc[:, -1].int().tolist()
+        fc[:, -1] = 0
+        inputs = (conv, fc)
         # calls CNN or MLP base. Rnn HXS is unused if not recurrent
         # value is critic output, actor features are actor output.
         value, actor_features, rnn_hxs = self.base(inputs, rnn_hxs, masks)
@@ -123,15 +128,19 @@ class MultiPolicy(WrappedPolicy):
             else:
                 self.action[i] = dist.sample()
 
-            self.action_log_probs[i] = dist.log_probs(self.action)
+            # print(i)
+            # print(self.action_log_probs.shape)
+            # print(self.action.shape)
+            self.action_log_probs[i] = dist.log_probs(self.action[i])
             self.probs[i] = dist.get_probs()
 
         # print(action)
         return value, self.action, self.action_log_probs, rnn_hxs, self.probs
 
     def get_value(self, inputs, rnn_hxs, masks):
-        options = inputs[:, 0]
-        inputs = inputs[:, 1:]
+        options = inputs[:, -1].int().tolist()
+        inputs[:, -1] = 0
+
         inputs = self._try_convert(inputs)
         value, actor_features, _ = self.base(inputs, rnn_hxs, masks)
         for i, o in enumerate(options):
@@ -141,14 +150,14 @@ class MultiPolicy(WrappedPolicy):
     def evaluate_actions(self, inputs, rnn_hxs, masks, action):
         # given an sample from the replay buffer, returns the state value,
         # the action log prob (for the chosen action) and the entropy of the distribution
+        options = inputs[:, -1].int().tolist()
+        inputs[:, -1] = 0
 
-        options = inputs[:, 0]
-        inputs = inputs[:, 1:]
         inputs = self._try_convert(inputs)
         value, actor_features, rnn_hxs = self.base(inputs, rnn_hxs, masks)
 
-        dist_entropy = torch.zeros(self.num_options)
-        action_log_probs = torch.zeros(self.num_options)
+        dist_entropy = torch.zeros_like(value)
+        action_log_probs = torch.zeros_like(value)
         for i, o in enumerate(options):
             value[i] = self.critics[o](actor_features[i])
             dist = self.dists[o](actor_features[i])
@@ -156,4 +165,4 @@ class MultiPolicy(WrappedPolicy):
             action_log_probs[i] = dist.log_probs(action[i])
             dist_entropy[i] = dist.entropy().mean()
 
-        return value, action_log_probs, dist_entropy, rnn_hxs
+        return value, action_log_probs, dist_entropy.mean(), rnn_hxs

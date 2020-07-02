@@ -211,6 +211,7 @@ class HierarchicalStepCollector(RolloutStepCollector):
             # print(f"actions: {action}")
             # Observe reward and next obs
             raw_obs, reward, done, infos = self._env.step(action)
+
             if self._render:
                 self._env.render(**self._render_kwargs)
             self.obs = raw_obs
@@ -218,9 +219,16 @@ class HierarchicalStepCollector(RolloutStepCollector):
             self.plan_length += 1
             self.cumulative_reward += reward * self.discounts
             # print("results now")
+            # call this to update the actions (tells policy current plan step was completed)
+            step_timeout, step_complete, plan_ended = self._policy.check_action_status(
+                self.obs.squeeze(1)
+            )
 
             for i, ((a, e), ai) in enumerate(results):
                 # print(f"results: {i}, {((a, e), ai)}")
+
+                # unpack the learner agent info now that learn_plan_policy is three tier.
+                ai = ai["agent_info_learn"]
                 if (
                     ai.get("failed") and not self.no_plan_penalty
                 ):  # add a penalty for failing to generate a plan
@@ -269,7 +277,7 @@ class HierarchicalStepCollector(RolloutStepCollector):
         recurrent_hidden_states = torch.cat(recurrent_hidden_states)
         action = torch.cat(action)
         action_log_prob = torch.cat(action_log_prob)
-        explored = torch.cat(explored)
+        explored = np.array(explored)
         value = torch.cat(value)
         reward = np.array(reward)
         plan_length = np.array(plan_length)
@@ -672,14 +680,34 @@ class ThreeTierStepCollector(RolloutStepCollector):
             return "have" + item
         if action["move"] is not None:
             return f"move ({action['move'][0]},{action['move'][1]})"
+        if action["collect"] is not None:
+            return f"collect coins"
         return None  # "noop"
 
     def clean_step(self, step):
         if step.sum().item() == 0:
             return None
+        if step.shape == torch.Size([]):
+            names = [
+                None,
+                "face tree",
+                "face rock",
+                "move",
+                "move",
+                "move",
+                "move",
+                "mine tree",
+                "mine rock",
+                "craft plank",
+                "craft stick",
+                "craft wooden_pickaxe",
+                "craft stone_pickaxe",
+                "collect",
+            ]
+            return names[int(step.item())]
         names = [
             "move",
-            "clear",
+            "collect",
             "face tree",
             "face rock",
             "mine tree",
@@ -694,4 +722,3 @@ class ThreeTierStepCollector(RolloutStepCollector):
 
     def clean_action(self, action):
         return ACTIONS(action.item() + 1).name
-

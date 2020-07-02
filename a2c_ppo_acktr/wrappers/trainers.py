@@ -199,11 +199,10 @@ class MultiTrainer:
                 if batch.max_step == batch.num_steps - 1:
                     trainer.train(batch)
             else:
-                # TODO: this needs to be expanded so the higher level only trains on full batches
                 trainer.train(batch)
 
     def get_diagnostics(self):
-        # TODO: Currently only returning one diagnostic - need to merge dictionary
+
         diagnostics = {}
         for k, v in self.trainers[0].get_diagnostics().items():
             diagnostics["controller/" + k] = v
@@ -227,7 +226,7 @@ class MultiTrainer:
         return n
 
     def get_snapshot(self):
-        # TODO: Currently only returning one snapshot - need to merge dictionary
+
         snapshot = {}
         for k, v in self.trainers[0].get_snapshot().items():
             snapshot["controller/" + k] = v
@@ -240,3 +239,29 @@ class MultiTrainer:
         #     trainer.get_snapshot() for trainer in self.trainers
         # ]  # this returns a list which may break things
 
+
+class DummyTrainer(TorchTrainer):
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def train(self, batch):
+        pass
+
+    def train_from_torch(self, batch):
+        pass
+
+    def get_snapshot(self):
+        return {}
+
+    @property
+    def networks(self):
+        return []
+
+    def end_epoch(self, epoch):
+        pass
+
+    def get_diagnostics(self):
+        return {}
+
+    def decay_lr(self, epoch, num_epochs):
+        pass
