@@ -198,12 +198,12 @@ class HierarchicalStepCollector(RolloutStepCollector):
         than required, each step we check to see if any environments have enough experience for this epoch, and if so we execute a no-op.
         """
         remaining = step_total - step
-
+        
         step_count = 0
         while not self.obs_queue.check_layer():
-            # print(remaining, step_total, step)
+            #print(remaining, step_total, step)
             valid_envs = [len(q) < remaining for q in self.obs_queue.queues]
-            # print(valid_envs)
+            #print(valid_envs)
             with torch.no_grad():
                 results = self._policy.get_action(self.obs, valid_envs=valid_envs)
 
@@ -221,7 +221,7 @@ class HierarchicalStepCollector(RolloutStepCollector):
             # print("results now")
             # call this to update the actions (tells policy current plan step was completed)
             step_timeout, step_complete, plan_ended = self._policy.check_action_status(
-                self.obs.squeeze(1)
+                self.obs.squeeze(1),valid_envs
             )
 
             for i, ((a, e), ai) in enumerate(results):
@@ -229,17 +229,22 @@ class HierarchicalStepCollector(RolloutStepCollector):
 
                 # unpack the learner agent info now that learn_plan_policy is three tier.
                 ai = ai["agent_info_learn"]
+                #print(f"results: {i}, {((a, e), ai)}")
                 if (
                     ai.get("failed") and not self.no_plan_penalty
                 ):  # add a penalty for failing to generate a plan
                     self.cumulative_reward[i] -= 0.5
+                    #print("FAILED")
                 if "subgoal" in ai:
+                    #print("SUBGOAL")
                     self.action_queue.add_item(
                         (ai["rnn_hxs"], ai["subgoal"], ai["probs"], e, ai["value"], ai),
                         i,
                     )
                 if (done[i] and valid_envs[i]) or "empty" in ai:
+                    #print("EMPTY")
                     if done[i]:
+                        #print("DONE")
                         self._policy.reset(i)
                     self.obs_queue.add_item(
                         (
