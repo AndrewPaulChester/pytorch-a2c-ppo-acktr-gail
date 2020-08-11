@@ -161,6 +161,7 @@ class HierarchicalStepCollector(RolloutStepCollector):
         num_processes=1,
         gamma=1,
         no_plan_penalty=False,
+        naive_discounting=False,
     ):
         super().__init__(
             env,
@@ -175,8 +176,13 @@ class HierarchicalStepCollector(RolloutStepCollector):
         self.obs_queue = MultiQueue(num_processes)
         self.cumulative_reward = np.zeros(num_processes)
         self.discounts = np.ones(num_processes)
-        self.plan_length = np.zeros(num_processes)
-        self.gamma = gamma
+        self.naive_discounting = naive_discounting
+        if self.naive_discounting:
+            self.gamma = 1
+            self.plan_length = np.ones(num_processes)
+        else:
+            self.gamma = gamma
+            self.plan_length = np.zeros(num_processes)
         self.no_plan_penalty = no_plan_penalty
 
     def collect_one_step(self, step, step_total):
@@ -216,7 +222,8 @@ class HierarchicalStepCollector(RolloutStepCollector):
                 self._env.render(**self._render_kwargs)
             self.obs = raw_obs
             self.discounts *= self.gamma
-            self.plan_length += 1
+            if not self.naive_discounting:
+                self.plan_length += 1
             self.cumulative_reward += reward * self.discounts
             # print("results now")
             # call this to update the actions (tells policy current plan step was completed)
